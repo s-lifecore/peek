@@ -15,7 +15,7 @@ import difflib
 from pathlib import Path
 
 SUPPORTED_EXT = {'.md', '.markdown', '.txt', '.pdf'}
-VERSION = "1.12.1"
+VERSION = "1.13.0"
 MAX_FILE_BYTES = 10 * 1024 * 1024  # 10 MB
 
 CONFIG_FILE = Path.home() / ".config" / "peek" / "settings.json"
@@ -912,7 +912,7 @@ Screen           { background: #1e1e2e; }
 Header           { background: #181825; color: #cdd6f4; }
 Footer           { background: #181825; color: #6c7086; }
 VerticalScroll   { height: 1fr; padding: 1 3; }
-.section         { color: #89b4fa; text-style: bold; padding: 1 0 0; }
+.section         { color: #89b4fa; text-style: bold; padding: 1 0 0 0; }
 .hint            { color: #6c7086; padding: 0 0 0 2; }
 .row             { height: 3; align: left middle; }
 .lbl             { width: 18; color: #a6adc8; }
@@ -921,7 +921,7 @@ Input            { width: 24; background: #313244; color: #cdd6f4; border: tall 
 Input:focus      { border: tall #89b4fa; }
 #custom-block    { display: none; padding: 0 2; }
 #custom-block.show { display: block; }
-.btn-row         { height: 3; padding: 1 0 0; align: left middle; }
+.btn-row         { height: 3; padding: 1 0 0 0; align: left middle; }
 Button           { margin-right: 2; }
 """
         BINDINGS = [Binding("ctrl+q", "quit", "保存せず閉じる")]
