@@ -445,7 +445,7 @@
 
     <div class="header-right">
       <span class="save-mode-badge">
-        {%- if save_mode == 'linux' %}Linux{%- else %}Windows{%- endif %}
+        {%- if platform == 'linux' %}Linux{%- else %}Windows{%- endif %}
       </span>
 
       {% if edit_mode %}
@@ -542,7 +542,7 @@
       h.appendChild(a);
     });
 
-    const SAVE_MODE = "{{ save_mode }}";
+    const PLATFORM = "{{ platform }}";
 
     function showToast(msg, type) {
       const t = document.getElementById('toast');
@@ -581,7 +581,7 @@
       label.textContent = '保存中...';
 
       try {
-        if (SAVE_MODE === 'linux') {
+        if (PLATFORM === 'linux') {
           const res = await fetch('/download');
           const data = await res.json();
           btn.classList.remove('loading');
@@ -625,7 +625,7 @@
         if (data.success) {
           btn.classList.add('success');
           label.textContent = '完了';
-          if (data.save_mode === 'linux') {
+          if (data.platform === 'linux') {
             showToast(`保存: ${data.path}`, 'success');
             setTimeout(() => resetBtn(btn, label, 'PDF 生成'), 3000);
           } else {

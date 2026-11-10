@@ -12,7 +12,7 @@ import socket
 from pathlib import Path
 
 SUPPORTED_EXT = {'.md', '.markdown', '.txt', '.pdf'}
-VERSION = "1.0.0"
+VERSION = "1.3.0"
 MAX_FILE_BYTES = 10 * 1024 * 1024  # 10 MB
 
 HELP_EN = """peek {version} - GUI file viewer for WSL terminals
@@ -21,8 +21,8 @@ USAGE:
   peek [options] <file>
 
 OPTIONS:
-  -w, --windows         Save downloads to Windows (default)
-  -l, --linux           Save downloads to Linux ~/Downloads/
+  -w, --windows         Open with Windows default browser, save to Windows (default)
+  -l, --linux           Open with Linux default browser, save to Linux ~/Downloads/
   -e, --edit            Edit mode: detach server + open live editor in browser
   --help-en             Show this help (English)
   --help-ja             Show help in Japanese
@@ -40,7 +40,7 @@ EXAMPLES:
   peek -e -l notes.txt
 
 HOW IT WORKS:
-  Starts a local web server and opens your Windows browser.
+  Starts a local web server and opens the browser for the specified platform.
   Press Ctrl+C in the terminal to stop the server.
   With -e, server runs in background and terminal is freed (kill <PID> to stop).
 """.format(version=VERSION)
@@ -51,8 +51,8 @@ HELP_JA = """peek {version} - WSL ターミナル用 GUI ファイルビュー�
   peek [オプション] <ファイル>
 
 オプション:
-  -w, --windows         Windows に保存（デフォルト）
-  -l, --linux           Linux の ~/Downloads/ に保存
+  -w, --windows         Windows のデフォルトブラウザで開く・Windows に保存（デフォルト）
+  -l, --linux           Linux のデフォルトブラウザで開く・Linux の ~/Downloads/ に保存
   -e, --edit            編集モード: サーバーをバックグラウンドで起動 + ライブエディタを開く
   --help-en             英語のヘルプを表示
   --help-ja             このヘルプを表示（日本語）
@@ -70,7 +70,7 @@ HELP_JA = """peek {version} - WSL ターミナル用 GUI ファイルビュー�
   peek -e -l notes.txt
 
 仕組み:
-  ローカルウェブサーバーを起動し、ブラウザで自動的に開きます。
+  ローカルウェブサーバーを起動し、指定したプラットフォームのブラウザで開きます。
   -e を指定するとサーバーがバックグラウンドで動作し、端末が解放されます（kill <PID> で停止）。
 """.format(version=VERSION)
 
@@ -86,11 +86,11 @@ def find_free_port(start=8899):
     raise RuntimeError("No free port available in range 8899-8999")
 
 
-def open_browser(port, token, save_mode="windows"):
+def open_browser(port, token, platform="windows"):
     time.sleep(0.8)
     url = f"http://localhost:{port}/?token={token}"
 
-    if save_mode == "linux":
+    if platform == "linux":
         cmds = [
             ["xdg-open", url],
             ["firefox", url],
@@ -102,7 +102,6 @@ def open_browser(port, token, save_mode="windows"):
         cmds = [
             ["cmd.exe", "/c", "start", "", url],
             ["wslview", url],
-            ["xdg-open", url],
         ]
 
     for cmd in cmds:
@@ -111,7 +110,19 @@ def open_browser(port, token, save_mode="windows"):
             return
         except FileNotFoundError:
             continue
-    print(f"peek: Could not open browser automatically. Visit {url}")
+
+    # All commands failed — print platform-specific guidance
+    if platform == "linux":
+        print("peek: Linux のブラウザが見つかりませんでした。")
+        print("      以下のいずれかでインストールしてください:")
+        print("        sudo apt install firefox")
+        print("        sudo apt install chromium-browser")
+        print(f"      または手動でアクセス: {url}")
+    else:
+        print("peek: Windows のブラウザを開けませんでした。")
+        print("      WSL から cmd.exe が実行できるか確認してください。")
+        print("      Linux ブラウザで開く場合: peek -l <ファイル>")
+        print(f"      または手動でアクセス: {url}")
 
 
 def _sanitize_error(msg):
@@ -211,7 +222,7 @@ def _pdf_via_pandoc(md_path, output_path):
     raise RuntimeError(result.stderr or "pandoc failed")
 
 
-def create_app(target_file, access_token, save_mode="windows", edit_mode=False):
+def create_app(target_file, access_token, platform="windows", edit_mode=False):
     try:
         from flask import Flask, render_template, send_file, abort, jsonify, request
         import markdown2
@@ -270,7 +281,7 @@ def create_app(target_file, access_token, save_mode="windows", edit_mode=False):
         ext = path.suffix.lower()
         _check_size(path)
 
-        common = dict(filename=path.name, save_mode=save_mode, edit_mode=edit_mode)
+        common = dict(filename=path.name, platform=platform, edit_mode=edit_mode)
 
         if ext == ".pdf":
             return render_template("view.html", file_type="pdf", content="", **common)
@@ -311,7 +322,7 @@ def create_app(target_file, access_token, save_mode="windows", edit_mode=False):
         """Download the source file (windows: browser DL / linux: ~/Downloads/)."""
         path = Path(target_file)
         _check_size(path)
-        if save_mode == "linux":
+        if platform == "linux":
             dest = _linux_save(str(path))
             return jsonify({"success": True, "path": dest})
         return send_file(str(path), as_attachment=True, download_name=path.name)
@@ -336,11 +347,11 @@ def create_app(target_file, access_token, save_mode="windows", edit_mode=False):
             except Exception as e2:
                 return jsonify({"success": False, "error": _sanitize_error(str(e2))}), 500
 
-        if save_mode == "linux":
+        if platform == "linux":
             # PDF is already in the Linux filesystem next to the .md file
             return jsonify({"success": True, "filename": output_pdf.name,
-                            "path": str(output_pdf), "save_mode": "linux"})
-        return jsonify({"success": True, "filename": output_pdf.name, "save_mode": "windows"})
+                            "path": str(output_pdf), "platform": "linux"})
+        return jsonify({"success": True, "filename": output_pdf.name, "platform": "windows"})
 
     @app.route("/download-pdf")
     def download_pdf():
@@ -374,14 +385,14 @@ def main():
         sys.exit(0)
 
     # Parse flags
-    save_mode = "windows"
+    platform = "windows"
     edit_mode = False
     clean_args = []
     for arg in args:
         if arg in ("-l", "--linux"):
-            save_mode = "linux"
+            platform = "linux"
         elif arg in ("-w", "--windows"):
-            save_mode = "windows"
+            platform = "windows"
         elif arg in ("-e", "--edit"):
             edit_mode = True
         else:
@@ -408,9 +419,9 @@ def main():
 
     port = find_free_port()
     access_token = secrets.token_urlsafe(32)
-    app = create_app(target_file, access_token, save_mode, edit_mode)
+    app = create_app(target_file, access_token, platform, edit_mode)
 
-    mode_label = "Linux ~/Downloads/" if save_mode == "linux" else "Windows"
+    mode_label = "Linux ~/Downloads/" if platform == "linux" else "Windows"
     edit_label = " [edit]" if edit_mode else ""
     print(f"peek: {Path(target_file).name}  [{mode_label}]{edit_label}")
     print(f"      http://localhost:{port}/?token=***")
@@ -434,7 +445,7 @@ def main():
     else:
         print("      Ctrl+C to close")
 
-    threading.Thread(target=open_browser, args=(port, access_token, save_mode), daemon=True).start()
+    threading.Thread(target=open_browser, args=(port, access_token, platform), daemon=True).start()
 
     import logging
     logging.getLogger("werkzeug").setLevel(logging.ERROR)
