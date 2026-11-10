@@ -23,6 +23,7 @@ USAGE:
 OPTIONS:
   -w, --windows         Save downloads to Windows (default)
   -l, --linux           Save downloads to Linux ~/Downloads/
+  -e, --edit            Edit mode: detach server + open live editor in browser
   --help-en             Show this help (English)
   --help-ja             Show help in Japanese
   --version             Show version
@@ -35,11 +36,13 @@ SUPPORTED FILE TYPES:
 EXAMPLES:
   peek README.md
   peek -l notes.txt
-  peek --windows document.pdf
+  peek -e README.md
+  peek -e -l notes.txt
 
 HOW IT WORKS:
   Starts a local web server and opens your Windows browser.
   Press Ctrl+C in the terminal to stop the server.
+  With -e, server runs in background and terminal is freed (kill <PID> to stop).
 """.format(version=VERSION)
 
 HELP_JA = """peek {version} - WSL ターミナル用 GUI ファイルビューア
@@ -50,6 +53,7 @@ HELP_JA = """peek {version} - WSL ターミナル用 GUI ファイルビュー�
 オプション:
   -w, --windows         Windows に保存（デフォルト）
   -l, --linux           Linux の ~/Downloads/ に保存
+  -e, --edit            編集モード: サーバーをバックグラウンドで起動 + ライブエディタを開く
   --help-en             英語のヘルプを表示
   --help-ja             このヘルプを表示（日本語）
   --version             バージョンを表示
@@ -62,11 +66,12 @@ HELP_JA = """peek {version} - WSL ターミナル用 GUI ファイルビュー�
 使用例:
   peek README.md
   peek -l notes.txt
-  peek --windows document.pdf
+  peek -e README.md
+  peek -e -l notes.txt
 
 仕組み:
-  ローカルウェブサーバーを起動し、Windows ブラウザで自動的に開きます。
-  サーバーを停止するにはターミナルで Ctrl+C を押してください。
+  ローカルウェブサーバーを起動し、ブラウザで自動的に開きます。
+  -e を指定するとサーバーがバックグラウンドで動作し、端末が解放されます（kill <PID> で停止）。
 """.format(version=VERSION)
 
 
@@ -206,7 +211,7 @@ def _pdf_via_pandoc(md_path, output_path):
     raise RuntimeError(result.stderr or "pandoc failed")
 
 
-def create_app(target_file, access_token, save_mode="windows"):
+def create_app(target_file, access_token, save_mode="windows", edit_mode=False):
     try:
         from flask import Flask, render_template, send_file, abort, jsonify, request
         import markdown2
@@ -265,18 +270,36 @@ def create_app(target_file, access_token, save_mode="windows"):
         ext = path.suffix.lower()
         _check_size(path)
 
+        common = dict(filename=path.name, save_mode=save_mode, edit_mode=edit_mode)
+
         if ext == ".pdf":
-            return render_template("view.html", file_type="pdf",
-                                   filename=path.name, content="", save_mode=save_mode)
+            return render_template("view.html", file_type="pdf", content="", **common)
         elif ext in (".md", ".markdown"):
             return render_template("view.html", file_type="markdown",
-                                   filename=path.name, content=_render_md(path), save_mode=save_mode)
+                                   content=_render_md(path), **common)
         elif ext == ".txt":
             content = path.read_text(encoding="utf-8")
-            return render_template("view.html", file_type="text",
-                                   filename=path.name, content=content, save_mode=save_mode)
+            return render_template("view.html", file_type="text", content=content, **common)
         else:
             abort(415)
+
+    @app.route("/content")
+    def get_content():
+        path = Path(target_file)
+        _check_size(path)
+        if path.suffix.lower() == ".pdf":
+            abort(415)
+        return jsonify({"content": path.read_text(encoding="utf-8")})
+
+    @app.route("/save", methods=["POST"])
+    def save_content():
+        if not edit_mode:
+            abort(403)
+        data = request.get_json(silent=True)
+        if not data or "content" not in data:
+            abort(400)
+        Path(target_file).write_text(data["content"], encoding="utf-8")
+        return jsonify({"success": True})
 
     @app.route("/raw")
     def serve_raw():
@@ -350,14 +373,17 @@ def main():
         print(f"peek {VERSION}")
         sys.exit(0)
 
-    # Parse -l / -w flags
+    # Parse flags
     save_mode = "windows"
+    edit_mode = False
     clean_args = []
     for arg in args:
         if arg in ("-l", "--linux"):
             save_mode = "linux"
         elif arg in ("-w", "--windows"):
             save_mode = "windows"
+        elif arg in ("-e", "--edit"):
+            edit_mode = True
         else:
             clean_args.append(arg)
     args = clean_args
@@ -382,12 +408,31 @@ def main():
 
     port = find_free_port()
     access_token = secrets.token_urlsafe(32)
-    app = create_app(target_file, access_token, save_mode)
+    app = create_app(target_file, access_token, save_mode, edit_mode)
 
     mode_label = "Linux ~/Downloads/" if save_mode == "linux" else "Windows"
-    print(f"peek: {Path(target_file).name}  [{mode_label}]")
+    edit_label = " [edit]" if edit_mode else ""
+    print(f"peek: {Path(target_file).name}  [{mode_label}]{edit_label}")
     print(f"      http://localhost:{port}/?token=***")
-    print("      Ctrl+C to close")
+
+    if edit_mode:
+        # Fork: parent exits (freeing terminal), child runs server
+        try:
+            pid = os.fork()
+        except AttributeError:
+            pid = 0  # os.fork unavailable, run in foreground
+
+        if pid > 0:
+            print(f"      PID {pid} — kill {pid} to stop")
+            sys.exit(0)
+
+        # Child: detach from terminal, run server silently
+        os.setsid()
+        sys.stdin = open(os.devnull)
+        sys.stdout = open(os.devnull, "w")
+        sys.stderr = open(os.devnull, "w")
+    else:
+        print("      Ctrl+C to close")
 
     threading.Thread(target=open_browser, args=(port, access_token, save_mode), daemon=True).start()
 

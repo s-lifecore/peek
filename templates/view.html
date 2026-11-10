@@ -351,6 +351,76 @@
       display: block;
       background: var(--surface);
     }
+
+    /* ───── Edit mode ───── */
+    .editor-layout {
+      display: flex;
+      flex: 1;
+      overflow: hidden;
+      min-height: 0;
+    }
+
+    .editor-pane {
+      display: flex;
+      flex-direction: column;
+      width: 50%;
+      min-width: 20%;
+      max-width: 80%;
+      border-right: 1px solid var(--border);
+      flex-shrink: 0;
+    }
+
+    .editor-textarea {
+      flex: 1;
+      resize: none;
+      border: none;
+      outline: none;
+      background: var(--bg);
+      color: var(--text);
+      font-family: "Consolas", "JetBrains Mono", "Fira Code", monospace;
+      font-size: 14px;
+      line-height: 1.65;
+      padding: 24px 28px;
+      tab-size: 4;
+      caret-color: var(--blue);
+      overflow-y: auto;
+    }
+    .editor-textarea::selection { background: rgba(137,180,250,0.25); }
+    .editor-textarea::-webkit-scrollbar { width: 6px; }
+    .editor-textarea::-webkit-scrollbar-track { background: transparent; }
+    .editor-textarea::-webkit-scrollbar-thumb { background: var(--overlay); border-radius: 3px; }
+
+    .edit-divider {
+      width: 5px;
+      cursor: col-resize;
+      background: var(--border);
+      flex-shrink: 0;
+      transition: background 0.15s;
+    }
+    .edit-divider:hover, .edit-divider.dragging { background: var(--blue); }
+
+    .preview-pane {
+      flex: 1;
+      overflow: auto;
+      min-width: 20%;
+    }
+    .preview-pane::-webkit-scrollbar { width: 8px; }
+    .preview-pane::-webkit-scrollbar-track { background: var(--surface); }
+    .preview-pane::-webkit-scrollbar-thumb { background: var(--overlay); border-radius: 4px; }
+
+    /* unsaved dot on header */
+    .unsaved-dot {
+      display: none;
+      width: 8px; height: 8px;
+      border-radius: 50%;
+      background: var(--yellow);
+      flex-shrink: 0;
+    }
+
+    /* edit-mode save button */
+    .save-btn { border-color: var(--mauve); color: var(--mauve); }
+    .save-btn:hover:not(:disabled) { background: var(--mauve); color: var(--surface); }
+    .save-btn.saved { border-color: var(--green); color: var(--green); }
   </style>
 </head>
 <body>
@@ -371,15 +441,24 @@
       <span class="badge badge-pdf">PDF</span>
     {% endif %}
 
+    {% if edit_mode %}<span class="unsaved-dot" id="unsaved-dot"></span>{% endif %}
+
     <div class="header-right">
       <span class="save-mode-badge">
         {%- if save_mode == 'linux' %}Linux{%- else %}Windows{%- endif %}
       </span>
 
+      {% if edit_mode %}
+      <button class="header-btn save-btn" id="save-btn" onclick="saveFile()">
+        <span class="spinner"></span>
+        <span class="btn-label">保存</span>
+      </button>
+      {% else %}
       <button class="header-btn dl-btn" id="dl-btn" onclick="downloadSource()">
         <span class="spinner"></span>
         <span class="btn-label">保存</span>
       </button>
+      {% endif %}
 
       {% if file_type == 'markdown' %}
       <button class="header-btn pdf-gen-btn" id="pdf-gen-btn" onclick="generatePdf()">
@@ -391,6 +470,23 @@
   </header>
 
   <div class="toast" id="toast"></div>
+
+  {% if edit_mode and file_type != 'pdf' %}
+
+  <div class="editor-layout">
+    <div class="editor-pane" id="editor-pane">
+      <textarea class="editor-textarea" id="editor" spellcheck="false"></textarea>
+    </div>
+
+    {% if file_type == 'markdown' %}
+    <div class="edit-divider" id="edit-divider"></div>
+    <div class="preview-pane" id="preview-pane">
+      <div class="markdown-body" id="preview"></div>
+    </div>
+    {% endif %}
+  </div>
+
+  {% else %}
 
   <main>
 
@@ -408,6 +504,8 @@
     {% endif %}
 
   </main>
+
+  {% endif %}
 
   {% if file_type == 'markdown' %}
   <script>
@@ -550,7 +648,140 @@
   </script>
   {% endif %}
 
-  {% if file_type == 'text' %}
+  {% if edit_mode and file_type != 'pdf' %}
+  <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+  <script>
+    const editor   = document.getElementById('editor');
+    const filename = "{{ filename }}";
+
+    // ── Load initial content ──────────────────────────────────────────────
+    fetch('/content')
+      .then(r => r.json())
+      .then(d => {
+        editor.value = d.content;
+        updatePreview();
+      });
+
+    // ── Live preview (markdown only) ──────────────────────────────────────
+    {% if file_type == 'markdown' %}
+    const preview = document.getElementById('preview');
+
+    marked.setOptions({ breaks: true, gfm: true });
+
+    function updatePreview() {
+      preview.innerHTML = marked.parse(editor.value);
+      preview.querySelectorAll('pre code').forEach(el => {
+        if (typeof hljs !== 'undefined') hljs.highlightElement(el);
+      });
+    }
+
+    let previewTimer = null;
+    editor.addEventListener('input', () => {
+      setUnsaved(true);
+      clearTimeout(previewTimer);
+      previewTimer = setTimeout(updatePreview, 180);
+    });
+    {% else %}
+    function updatePreview() {}
+    editor.addEventListener('input', () => setUnsaved(true));
+    {% endif %}
+
+    // ── Unsaved indicator ─────────────────────────────────────────────────
+    let _unsaved = false;
+    function setUnsaved(state) {
+      if (_unsaved === state) return;
+      _unsaved = state;
+      const dot = document.getElementById('unsaved-dot');
+      if (dot) dot.style.display = state ? 'inline-block' : 'none';
+      document.title = state ? `● ${filename}` : filename;
+    }
+
+    // ── Save ──────────────────────────────────────────────────────────────
+    async function saveFile() {
+      const btn   = document.getElementById('save-btn');
+      const label = btn.querySelector('.btn-label');
+      btn.disabled = true;
+      btn.classList.add('loading');
+      label.textContent = '保存中...';
+
+      try {
+        const res = await fetch('/save', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ content: editor.value }),
+        });
+        const data = await res.json();
+        btn.classList.remove('loading');
+        if (data.success) {
+          setUnsaved(false);
+          btn.classList.add('saved');
+          label.textContent = '保存済み';
+          setTimeout(() => {
+            btn.classList.remove('saved');
+            label.textContent = '保存';
+            btn.disabled = false;
+          }, 1800);
+        } else {
+          label.textContent = '保存';
+          btn.disabled = false;
+        }
+      } catch (e) {
+        btn.classList.remove('loading');
+        label.textContent = '保存';
+        btn.disabled = false;
+      }
+    }
+
+    // Ctrl+S / Cmd+S
+    document.addEventListener('keydown', e => {
+      if ((e.ctrlKey || e.metaKey) && e.key === 's') {
+        e.preventDefault();
+        saveFile();
+      }
+    });
+
+    // Tab → 4 spaces in textarea
+    editor.addEventListener('keydown', e => {
+      if (e.key === 'Tab') {
+        e.preventDefault();
+        const s = editor.selectionStart, end = editor.selectionEnd;
+        editor.value = editor.value.substring(0, s) + '    ' + editor.value.substring(end);
+        editor.selectionStart = editor.selectionEnd = s + 4;
+        setUnsaved(true);
+        updatePreview();
+      }
+    });
+
+    // ── Draggable divider (markdown only) ─────────────────────────────────
+    {% if file_type == 'markdown' %}
+    const divider    = document.getElementById('edit-divider');
+    const editorPane = document.getElementById('editor-pane');
+    let dragging     = false;
+
+    divider.addEventListener('mousedown', () => {
+      dragging = true;
+      divider.classList.add('dragging');
+      document.body.style.cursor      = 'col-resize';
+      document.body.style.userSelect  = 'none';
+    });
+    document.addEventListener('mousemove', e => {
+      if (!dragging) return;
+      const layout = document.querySelector('.editor-layout');
+      const pct    = ((e.clientX - layout.getBoundingClientRect().left) / layout.offsetWidth) * 100;
+      editorPane.style.width = `${Math.max(20, Math.min(80, pct))}%`;
+    });
+    document.addEventListener('mouseup', () => {
+      if (!dragging) return;
+      dragging = false;
+      divider.classList.remove('dragging');
+      document.body.style.cursor     = '';
+      document.body.style.userSelect = '';
+    });
+    {% endif %}
+  </script>
+  {% endif %}
+
+  {% if file_type == 'text' and not edit_mode %}
   <script>
     // Build line-number table from pre content
     const pre = document.querySelector('.text-body');
