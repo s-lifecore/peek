@@ -81,14 +81,26 @@ def find_free_port(start=8899):
     raise RuntimeError("No free port available in range 8899-8999")
 
 
-def open_browser(port, token):
+def open_browser(port, token, save_mode="windows"):
     time.sleep(0.8)
     url = f"http://localhost:{port}/?token={token}"
-    for cmd in [
-        ["cmd.exe", "/c", "start", "", url],
-        ["wslview", url],
-        ["xdg-open", url],
-    ]:
+
+    if save_mode == "linux":
+        cmds = [
+            ["xdg-open", url],
+            ["firefox", url],
+            ["google-chrome", url],
+            ["chromium-browser", url],
+            ["chromium", url],
+        ]
+    else:
+        cmds = [
+            ["cmd.exe", "/c", "start", "", url],
+            ["wslview", url],
+            ["xdg-open", url],
+        ]
+
+    for cmd in cmds:
         try:
             subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
             return
@@ -377,7 +389,7 @@ def main():
     print(f"      http://localhost:{port}/?token=***")
     print("      Ctrl+C to close")
 
-    threading.Thread(target=open_browser, args=(port, access_token), daemon=True).start()
+    threading.Thread(target=open_browser, args=(port, access_token, save_mode), daemon=True).start()
 
     import logging
     logging.getLogger("werkzeug").setLevel(logging.ERROR)
