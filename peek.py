@@ -15,7 +15,7 @@ import difflib
 from pathlib import Path
 
 SUPPORTED_EXT = {'.md', '.markdown', '.txt', '.pdf'}
-VERSION = "1.14.0"
+VERSION = "1.14.1"
 MAX_FILE_BYTES = 10 * 1024 * 1024  # 10 MB
 
 CONFIG_FILE = Path.home() / ".config" / "peek" / "settings.json"
@@ -1023,6 +1023,487 @@ Button           { margin-right: 2; }
     PeekSettingsApp().run()
 
 
+def _run_easter_egg():
+    try:
+        from textual.app import App, ComposeResult
+        from textual.widgets import Static
+        from textual.binding import Binding
+        from textual.containers import Vertical
+    except ImportError:
+        print(f"\n👀  peek! {VERSION}\n")
+        return
+
+    wall_w = min(shutil.get_terminal_size((80, 24)).columns - 4, 68)
+    ART_HEIGHT = 6
+    WALL = "─" * wall_w
+
+    EYES_NORMAL = "◉   ◉"
+    EYES_BLINK  = "-   -"
+    EYES_RIGHT  = "·   ◉"
+    EYES_LEFT   = "◉   ·"
+
+    def _art(eyes, n):
+        lines = [
+            "  /\\_____/\\  ",
+            f" /  {eyes}  \\ ",
+            "( =   ^   = )",
+            " )  peek!  ( ",
+        ]
+        visible = lines[len(lines) - n:] if n > 0 else []
+        return "\n".join([""] * (ART_HEIGHT - len(visible)) + visible)
+
+    STAGES = [
+        (0, EYES_NORMAL, 0.5),
+        (1, EYES_NORMAL, 0.35),
+        (2, EYES_NORMAL, 0.3),
+        (3, EYES_NORMAL, 0.3),
+        (4, EYES_NORMAL, 0.4),
+        (4, EYES_BLINK,  0.18),
+        (4, EYES_NORMAL, 0.4),
+        (4, EYES_RIGHT,  0.5),
+        (4, EYES_LEFT,   0.5),
+        (4, EYES_NORMAL, 0.3),
+        (4, EYES_BLINK,  0.18),
+        (4, EYES_NORMAL, 0.5),
+        (3, EYES_NORMAL, 0.3),
+        (2, EYES_NORMAL, 0.3),
+        (1, EYES_NORMAL, 0.3),
+        (0, EYES_NORMAL, 0.4),
+    ]
+
+    class _EggApp(App):
+        CSS = f"""
+Screen {{ background: #1e1e2e; align: center middle; }}
+#title {{ width: 30; height: 1; color: #f9e2af; text-style: bold; text-align: center; }}
+#art   {{ width: 20; height: {ART_HEIGHT}; color: #cdd6f4; text-align: center; }}
+#wall  {{ width: {wall_w}; color: #89b4fa; text-align: center; }}
+#hint  {{ color: #6c7086; text-align: center; margin-top: 1; }}
+"""
+        BINDINGS = [
+            Binding("q",      "quit", "", show=False),
+            Binding("escape", "quit", "", show=False),
+            Binding("space",  "quit", "", show=False),
+            Binding("enter",  "quit", "", show=False),
+        ]
+
+        def compose(self) -> ComposeResult:
+            with Vertical():
+                yield Static("", id="title")
+                yield Static(_art(EYES_NORMAL, 0), id="art")
+                yield Static(WALL, id="wall")
+                yield Static("any key to exit", id="hint")
+
+        def on_mount(self) -> None:
+            self._stage = 0
+            self._title_on = False
+            self._next()
+
+        def _next(self) -> None:
+            if self._stage < len(STAGES):
+                self.set_timer(STAGES[self._stage][2], self._tick)
+            else:
+                self.set_timer(0.5, self.exit)
+
+        def _tick(self) -> None:
+            if self._stage >= len(STAGES):
+                self.exit()
+                return
+            n, eyes, _ = STAGES[self._stage]
+            self.query_one("#art", Static).update(_art(eyes, n))
+            if n == 4:
+                self._title_on = True
+            if self._title_on and n > 0:
+                self.query_one("#title", Static).update(f"✦  peek {VERSION}  ✦")
+            elif n == 0:
+                self._title_on = False
+                self.query_one("#title", Static).update("")
+            self._stage += 1
+            self._next()
+
+        def on_key(self, event) -> None:
+            self.exit()
+
+    _EggApp().run()
+
+
+# ── easter egg: matrix ────────────────────────────────────────────────────────
+def _run_matrix():
+    try:
+        from textual.app import App, ComposeResult
+        from textual.widgets import Static
+        from textual.binding import Binding
+        import random
+    except ImportError:
+        print("\n01001110 01001111 peek\n")
+        return
+
+    KATAKANA = "ｦｧｨｩｪｫｬｭｮｯｰｱｲｳｴｵｶｷｸｹｺｻｼｽｾｿﾀﾁﾂﾃﾄﾅﾆﾇﾈﾉﾊﾋﾌﾍﾎﾏﾐﾑﾒﾓﾔﾕﾖﾗﾘﾙﾚﾛﾜﾝ"
+    CHARS = KATAKANA + "0123456789"
+
+    class _MatrixApp(App):
+        CSS = """
+Screen { background: #0d0d0d; }
+#canvas { width: 100%; height: 100%; }
+#hint { dock: bottom; color: #1a4a1a; text-align: center; height: 1; }
+"""
+        BINDINGS = [
+            Binding("q",      "quit", "", show=False),
+            Binding("escape", "quit", "", show=False),
+            Binding("space",  "quit", "", show=False),
+            Binding("enter",  "quit", "", show=False),
+        ]
+
+        def compose(self) -> ComposeResult:
+            yield Static("", id="canvas")
+            yield Static("any key to exit", id="hint")
+
+        def on_mount(self) -> None:
+            cols, rows = shutil.get_terminal_size((80, 24))
+            self._cols = cols
+            self._rows = rows - 1
+            self._drops = [random.randint(-rows, 0) for _ in range(cols)]
+            self._speeds = [random.choice([1, 1, 1, 2]) for _ in range(cols)]
+            self._chars = [
+                [random.choice(CHARS) for _ in range(rows)] for _ in range(cols)
+            ]
+            self.set_interval(0.08, self._tick)
+
+        def _tick(self) -> None:
+            cols, rows = self._cols, self._rows
+            grid = [[" "] * cols for _ in range(rows)]
+            for c in range(cols):
+                head = self._drops[c]
+                for r in range(rows):
+                    dist = head - r
+                    if dist == 0:
+                        ch = self._chars[c][r % rows]
+                        grid[r][c] = f"\x1b[1;92m{ch}\x1b[0m"
+                    elif 0 < dist <= 6:
+                        ch = self._chars[c][r % rows]
+                        brightness = ["32", "32", "32", "2;32", "2;32", "2;32"][dist - 1]
+                        grid[r][c] = f"\x1b[{brightness}m{ch}\x1b[0m"
+                self._drops[c] += self._speeds[c]
+                if self._drops[c] > rows + 6:
+                    self._drops[c] = random.randint(-8, 0)
+                    self._chars[c] = [random.choice(CHARS) for _ in range(rows)]
+            lines = ["".join(grid[r]) for r in range(rows)]
+            self.query_one("#canvas", Static).update("\n".join(lines))
+
+        def on_key(self, event) -> None:
+            self.exit()
+
+    _MatrixApp().run()
+
+
+# ── easter egg: aquarium ──────────────────────────────────────────────────────
+def _run_aquarium():
+    try:
+        from textual.app import App, ComposeResult
+        from textual.widgets import Static
+        from textual.binding import Binding
+        import random
+    except ImportError:
+        print("\n><((º>  🐠  <º)))><\n")
+        return
+
+    FISH_R = ["  ><((º> ", " ><((º>  ", "><((º>   "]
+    FISH_L = [" <º)))><  ", "  <º)))>< ", "   <º)))><"]
+    SMALL_R = [" >((º>", ">((º> "]
+    SMALL_L = ["<º))< ", " <º))<"]
+    BUBBLE = ["·", "o", "°"]
+    SEAWEED = ["|", "¦", "ı", "¦"]
+
+    class _AquariumApp(App):
+        CSS = """
+Screen { background: #001830; align: center middle; }
+#tank  { width: 72; height: 20; }
+#hint  { color: #1a3a4a; text-align: center; margin-top: 1; }
+"""
+        BINDINGS = [
+            Binding("q",      "quit", "", show=False),
+            Binding("escape", "quit", "", show=False),
+            Binding("space",  "quit", "", show=False),
+            Binding("enter",  "quit", "", show=False),
+        ]
+
+        def compose(self) -> ComposeResult:
+            yield Static("", id="tank")
+            yield Static("any key to exit", id="hint")
+
+        def on_mount(self) -> None:
+            W, H = 70, 18
+            self._W = W
+            self._H = H
+            import random as rnd
+            self._fish = [
+                {"x": rnd.randint(0, W - 10), "y": rnd.randint(1, H - 4),
+                 "dx": 1, "frames": FISH_R, "alt": FISH_L, "frame": 0},
+                {"x": rnd.randint(0, W - 10), "y": rnd.randint(1, H - 4),
+                 "dx": -1, "frames": FISH_L, "alt": FISH_R, "frame": 1},
+                {"x": rnd.randint(0, W - 8),  "y": rnd.randint(1, H - 4),
+                 "dx": 1, "frames": SMALL_R, "alt": SMALL_L, "frame": 0},
+                {"x": rnd.randint(0, W - 8),  "y": rnd.randint(1, H - 4),
+                 "dx": -1, "frames": SMALL_L, "alt": SMALL_R, "frame": 1},
+            ]
+            self._bubbles = [
+                {"x": rnd.randint(2, W - 2), "y": rnd.randint(2, H - 2),
+                 "char": rnd.choice(BUBBLE)} for _ in range(10)
+            ]
+            self._seaweed_x = [rnd.randint(2, W - 2) for _ in range(5)]
+            self._tick_n = 0
+            self.set_interval(0.18, self._tick)
+
+        def _tick(self) -> None:
+            import random as rnd
+            W, H = self._W, self._H
+            self._tick_n += 1
+
+            grid = [[" "] * W for _ in range(H)]
+
+            # border
+            for c in range(W):
+                grid[0][c]     = "\x1b[34m─\x1b[0m"
+                grid[H-1][c]   = "\x1b[34m─\x1b[0m"
+            for r in range(H):
+                grid[r][0]     = "\x1b[34m│\x1b[0m"
+                grid[r][W-1]   = "\x1b[34m│\x1b[0m"
+            grid[0][0] = grid[0][W-1] = "\x1b[34m─\x1b[0m"
+
+            # seaweed
+            for sx in self._seaweed_x:
+                sw_char = SEAWEED[self._tick_n % len(SEAWEED)]
+                for r in range(H - 4, H - 1):
+                    if 1 <= sx < W - 1:
+                        grid[r][sx] = f"\x1b[32m{sw_char}\x1b[0m"
+
+            # bubbles drift up
+            for b in self._bubbles:
+                r, c = int(b["y"]), int(b["x"])
+                if 1 <= r < H - 1 and 1 <= c < W - 1:
+                    grid[r][c] = f"\x1b[36m{b['char']}\x1b[0m"
+                b["y"] -= 0.3
+                if b["y"] < 1:
+                    b["y"] = H - 2
+                    b["x"] = rnd.randint(2, W - 2)
+                    b["char"] = rnd.choice(BUBBLE)
+
+            # fish
+            for f in self._fish:
+                body = f["frames"][f["frame"] % len(f["frames"])]
+                f["frame"] += 1
+                x, y = int(f["x"]), int(f["y"])
+                color = "\x1b[33m" if len(body) > 7 else "\x1b[35m"
+                for i, ch in enumerate(body):
+                    cx = x + i
+                    if 1 <= y < H - 1 and 1 <= cx < W - 1:
+                        grid[y][cx] = f"{color}{ch}\x1b[0m"
+                f["x"] += f["dx"] * 0.6
+                if f["x"] >= W - len(body) - 1:
+                    f["dx"] = -1
+                    f["frames"], f["alt"] = f["alt"], f["frames"]
+                if f["x"] <= 1:
+                    f["dx"] = 1
+                    f["frames"], f["alt"] = f["alt"], f["frames"]
+
+            # sand
+            sand = "·" * (W - 2)
+            grid[H-2][1:W-1] = list(f"\x1b[33m{sand}\x1b[0m")
+
+            lines = ["".join(grid[r]) for r in range(H)]
+            self.query_one("#tank", Static).update("\n".join(lines))
+
+        def on_key(self, event) -> None:
+            self.exit()
+
+    _AquariumApp().run()
+
+
+# ── easter egg: zen ───────────────────────────────────────────────────────────
+def _run_zen():
+    try:
+        from textual.app import App, ComposeResult
+        from textual.widgets import Static
+        from textual.binding import Binding
+        from textual.containers import Vertical
+        import random
+    except ImportError:
+        print(f"\n☽\n\n「開けば世界が見える」\n\n  -- peek {VERSION}\n")
+        return
+
+    QUOTES = [
+        "「開けば、世界が見える」",
+        "「静寂の中に、答えがある」",
+        "「見ることは、知ること」",
+        "「一行の文字が、旅の始まり」",
+        "「ファイルは鏡、読む者を映す」",
+        "「急がば、peek せよ」",
+        "「余白を恐れるな」",
+    ]
+
+    import random
+    quote = random.choice(QUOTES)
+
+    MOON = "    ☽    "
+    MOUNTAIN = [
+        "        /\\        /\\       ",
+        "       /  \\      /  \\      ",
+        "      /    \\    /    \\     ",
+        "     /      \\  /      \\    ",
+        "    /        \\/        \\   ",
+        "~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~",
+    ]
+
+    STAGES = (
+        # (moon_alpha, mountain_lines, quote_alpha, dt)
+        (0, 0, 0, 0.3),
+        (1, 0, 0, 0.5),
+        (1, 1, 0, 0.3),
+        (1, 2, 0, 0.3),
+        (1, 3, 0, 0.3),
+        (1, 4, 0, 0.3),
+        (1, 5, 0, 0.3),
+        (1, 6, 0, 0.5),
+        (1, 6, 1, 0.5),
+        (1, 6, 2, 0.6),
+    )
+
+    MOON_COLORS = ["", "\x1b[2;33m", "\x1b[33m"]
+    QUOTE_COLORS = ["", "\x1b[2;37m", "\x1b[37m"]
+
+    class _ZenApp(App):
+        CSS = f"""
+Screen {{ background: #0a0a14; align: center middle; }}
+#moon    {{ height: 1; color: #f9e2af; text-align: center; text-style: bold; }}
+#mountain{{ height: 7; color: #7aa2f7; text-align: center; }}
+#quote   {{ height: 1; color: #cdd6f4; text-align: center; margin-top: 1; }}
+#author  {{ height: 1; color: #6c7086; text-align: center; }}
+#hint    {{ height: 1; color: #313244; text-align: center; margin-top: 2; }}
+"""
+        BINDINGS = [
+            Binding("q",      "quit", "", show=False),
+            Binding("escape", "quit", "", show=False),
+            Binding("space",  "quit", "", show=False),
+            Binding("enter",  "quit", "", show=False),
+        ]
+
+        def compose(self) -> ComposeResult:
+            with Vertical():
+                yield Static("", id="moon")
+                yield Static("", id="mountain")
+                yield Static("", id="quote")
+                yield Static("", id="author")
+                yield Static("any key to exit", id="hint")
+
+        def on_mount(self) -> None:
+            self._stage = 0
+            self._next()
+
+        def _next(self) -> None:
+            if self._stage < len(STAGES):
+                self.set_timer(STAGES[self._stage][3], self._tick)
+
+        def _tick(self) -> None:
+            if self._stage >= len(STAGES):
+                return
+            moon_a, mt_n, qt_a, _ = STAGES[self._stage]
+            mc = MOON_COLORS[moon_a]
+            self.query_one("#moon", Static).update(f"{mc}{MOON}\x1b[0m" if moon_a else "")
+            mt_text = "\n".join(MOUNTAIN[:mt_n]) if mt_n else ""
+            self.query_one("#mountain", Static).update(mt_text)
+            qc = QUOTE_COLORS[qt_a]
+            self.query_one("#quote", Static).update(f"{qc}{quote}\x1b[0m" if qt_a else "")
+            if qt_a == 2:
+                self.query_one("#author", Static).update(f"\x1b[2;37m-- peek {VERSION}\x1b[0m")
+            self._stage += 1
+            self._next()
+
+        def on_key(self, event) -> None:
+            self.exit()
+
+    _ZenApp().run()
+
+
+# ── easter egg: 404 ───────────────────────────────────────────────────────────
+def _run_404():
+    try:
+        from textual.app import App, ComposeResult
+        from textual.widgets import Static
+        from textual.binding import Binding
+        from textual.containers import Vertical
+        import random
+    except ImportError:
+        print("\n(╯°□°）╯︵ ┻━┻\n\nファイルが見つかりません。でも peek はあきらめない。\n")
+        return
+
+    import random
+
+    MSGS = [
+        "探したけど…なかった。",
+        "ファイル、蒸発しました。",
+        "404: 存在しない未来。",
+        "どこかに行ってしまった。",
+        "宇宙のどこかにあるはず。",
+        "消えた。でも peek はここにいる。",
+    ]
+
+    FLIP_STAGES = [
+        ("( °□°）      ┳━┳",   0.3),
+        ("( °□°）つ    ┳━┳",   0.25),
+        ("(╯°□°）╯     ┳━┳",   0.2),
+        ("(╯°□°）╯︵   ┳━┳",   0.15),
+        ("(╯°□°）╯︵   ┻━┻",   0.3),
+        ("(╯°□°）╯︵ ┻━┻",     0.5),
+    ]
+
+    msg = random.choice(MSGS)
+
+    class _404App(App):
+        CSS = """
+Screen  { background: #1e1e2e; align: center middle; }
+#flip   { height: 1; color: #f38ba8; text-style: bold; text-align: center; }
+#msg    { height: 1; color: #cdd6f4; text-align: center; margin-top: 1; }
+#sub    { height: 1; color: #6c7086; text-align: center; }
+#hint   { height: 1; color: #313244; text-align: center; margin-top: 2; }
+"""
+        BINDINGS = [
+            Binding("q",      "quit", "", show=False),
+            Binding("escape", "quit", "", show=False),
+            Binding("space",  "quit", "", show=False),
+            Binding("enter",  "quit", "", show=False),
+        ]
+
+        def compose(self) -> ComposeResult:
+            with Vertical():
+                yield Static("", id="flip")
+                yield Static("", id="msg")
+                yield Static("", id="sub")
+                yield Static("any key to exit", id="hint")
+
+        def on_mount(self) -> None:
+            self._stage = 0
+            self._next()
+
+        def _next(self) -> None:
+            if self._stage < len(FLIP_STAGES):
+                self.set_timer(FLIP_STAGES[self._stage][1], self._tick)
+            else:
+                self.query_one("#msg",  Static).update(msg)
+                self.query_one("#sub",  Static).update(f"peek {VERSION} はあきらめない。")
+
+        def _tick(self) -> None:
+            if self._stage >= len(FLIP_STAGES):
+                return
+            text, _ = FLIP_STAGES[self._stage]
+            self.query_one("#flip", Static).update(text)
+            self._stage += 1
+            self._next()
+
+        def on_key(self, event) -> None:
+            self.exit()
+
+    _404App().run()
+
+
 def _do_update():
     script_dir = os.path.dirname(os.path.abspath(__file__))
     venv_pip = str(Path.home() / ".local" / "share" / "peek-venv" / "bin" / "pip")
@@ -1046,6 +1527,7 @@ _ALL_FLAGS = [
     '-w', '--windows', '-l', '--linux', '-m', '--mac',
     '-e', '--edit', '-s', '--settings',
     '--update', '--help-en', '--help-ja', '--version', '-v',
+    '--peek', '--matrix', '--aquarium', '--zen', '--404',
 ]
 _SHORT_FLAGS = set('tblmwevs')
 
@@ -1091,6 +1573,26 @@ def main():
 
     if args[0] in ("--update", "update"):
         _do_update()
+        sys.exit(0)
+
+    if args[0] == "--peek":
+        _run_easter_egg()
+        sys.exit(0)
+
+    if args[0] == "--matrix":
+        _run_matrix()
+        sys.exit(0)
+
+    if args[0] == "--aquarium":
+        _run_aquarium()
+        sys.exit(0)
+
+    if args[0] == "--zen":
+        _run_zen()
+        sys.exit(0)
+
+    if args[0] == "--404":
+        _run_404()
         sys.exit(0)
 
     if args[0] in ("-s", "--settings"):
