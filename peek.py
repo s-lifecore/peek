@@ -12,7 +12,7 @@ import socket
 from pathlib import Path
 
 SUPPORTED_EXT = {'.md', '.markdown', '.txt', '.pdf'}
-VERSION = "1.5.0"
+VERSION = "1.5.1"
 MAX_FILE_BYTES = 10 * 1024 * 1024  # 10 MB
 
 HELP_EN = """peek {version} - GUI file viewer for WSL / Linux / macOS terminals
@@ -30,23 +30,25 @@ OPTIONS:
   --help-ja             Show help in Japanese
   --version             Show version
 
-  Platform is auto-detected if no flag is given:
-    macOS  → -m   |   WSL → -w   |   Linux → -l
+  No flag: opens in TUI mode directly in the terminal (default).
+  With -w/-l/-m: opens in browser instead.
+  With -e: browser-based live editor (platform auto-detected if no flag).
 
 SUPPORTED FILE TYPES:
-  .md / .markdown       Rendered Markdown with code highlighting
-  .txt                  Plain text with monospace display
-  .pdf                  Native PDF viewer in browser
+  .md / .markdown       Rendered Markdown with syntax highlighting
+  .txt                  Plain text with line numbers
+  .pdf                  TUI: text extraction via pdftotext / browser: native viewer
 
 EXAMPLES:
-  peek README.md
-  peek -l notes.txt
-  peek -m README.md        # macOS
-  peek -e README.md
+  peek README.md             # TUI viewer (default)
+  peek -w README.md          # Windows browser
+  peek -l notes.txt          # Linux browser
+  peek -m README.md          # macOS browser
+  peek -e README.md          # browser live editor
 
 HOW IT WORKS:
-  Starts a local web server and opens the browser for the detected platform.
-  Press Ctrl+C in the terminal to stop the server.
+  TUI mode: renders the file directly in the terminal using textual.
+  Browser mode (-w/-l/-m): starts a local Flask server and opens the browser.
   With -e, server runs in background and terminal is freed (kill <PID> to stop).
 """.format(version=VERSION)
 
@@ -65,23 +67,26 @@ HELP_JA = """peek {version} - WSL / Linux / macOS ターミナル用 GUI ファ�
   --help-ja             このヘルプを表示（日本語）
   --version             バージョンを表示
 
-  フラグ未指定時は OS を自動検出:
-    macOS → -m   |   WSL → -w   |   Linux → -l
+  フラグなし: ターミナル内 TUI モードで表示（デフォルト）。
+  -w/-l/-m: ブラウザで開く。
+  -e: ブラウザライブエディタ（フラグなしの場合は OS を自動検出）。
 
 対応ファイル形式:
-  .md / .markdown        コードハイライト付きマークダウンレンダリング
-  .txt                   等幅フォントでプレーンテキスト表示
-  .pdf                   ブラウザのネイティブ PDF ビューア
+  .md / .markdown        シンタックスハイライト付き Markdown レンダリング
+  .txt                   行番号付きプレーンテキスト表示
+  .pdf                   TUI: pdftotext でテキスト抽出 / ブラウザ: ネイティブビューア
 
 使用例:
-  peek README.md
-  peek -l notes.txt
-  peek -m README.md        # macOS
-  peek -e README.md
+  peek README.md             # TUI ビューア（デフォルト）
+  peek -w README.md          # Windows ブラウザ
+  peek -l notes.txt          # Linux ブラウザ
+  peek -m README.md          # macOS ブラウザ
+  peek -e README.md          # ブラウザライブエディタ
 
 仕組み:
-  ローカルウェブサーバーを起動し、検出されたプラットフォームのブラウザで開きます。
-  -e を指定するとサーバーがバックグラウンドで動作し、端末が解放されます（kill <PID> で停止）。
+  TUI モード: textual を使ってターミナル内に直接レンダリング。
+  ブラウザモード (-w/-l/-m): Flask ローカルサーバーを起動しブラウザで開く。
+  -e: サーバーがバックグラウンドで動作し、端末が解放されます（kill <PID> で停止）。
 """.format(version=VERSION)
 
 
@@ -392,6 +397,92 @@ def create_app(target_file, access_token, platform="windows", edit_mode=False):
     return app
 
 
+def _run_tui(target_file):
+    try:
+        from textual.app import App, ComposeResult
+        from textual.widgets import Header, Footer, Markdown, Static
+        from textual.binding import Binding
+        from textual.containers import VerticalScroll
+    except ImportError:
+        print("peek: textual が見つかりません。セットアップを再実行してください:")
+        print("      bash setup.sh")
+        sys.exit(1)
+
+    path = Path(target_file)
+    ext = path.suffix.lower()
+
+    if path.stat().st_size > MAX_FILE_BYTES:
+        print(f"peek: ファイルが大きすぎます（上限 {MAX_FILE_BYTES // 1024 // 1024} MB）")
+        sys.exit(1)
+
+    file_type = 'text'
+    content = ''
+
+    if ext in ('.md', '.markdown'):
+        content = path.read_text(encoding='utf-8')
+        file_type = 'markdown'
+    elif ext == '.txt':
+        content = path.read_text(encoding='utf-8')
+        file_type = 'text'
+    elif ext == '.pdf':
+        file_type = 'pdf'
+        try:
+            r = subprocess.run(
+                ['pdftotext', target_file, '-'],
+                capture_output=True, text=True, timeout=30,
+            )
+            if r.returncode == 0 and r.stdout.strip():
+                content = r.stdout
+                file_type = 'text'
+        except (FileNotFoundError, subprocess.TimeoutExpired):
+            pass
+
+    TYPE_LABEL = {'markdown': 'MD', 'text': 'TXT', 'pdf': 'PDF'}
+
+    class PeekApp(App):
+        TITLE = path.name
+        SUB_TITLE = TYPE_LABEL.get(file_type, '')
+        CSS = """
+        Screen        { background: #1e1e2e; }
+        Header        { background: #181825; color: #cdd6f4; }
+        Footer        { background: #181825; color: #6c7086; }
+        Markdown      { height: 1fr; padding: 1 2; background: #1e1e2e; }
+        VerticalScroll{ height: 1fr; background: #1e1e2e; }
+        #txt          { color: #cdd6f4; padding: 1 2; }
+        #pdf-info     { color: #f9e2af; padding: 2 4; }
+        """
+        BINDINGS = [Binding("q", "quit", "終了")]
+
+        def compose(self) -> ComposeResult:
+            yield Header(show_clock=False)
+            if file_type == 'markdown':
+                yield Markdown(content)
+            elif file_type == 'text':
+                lines = content.split('\n')
+                w = len(str(len(lines)))
+                numbered = '\n'.join(
+                    f'{str(i + 1).rjust(w)}  {line}'
+                    for i, line in enumerate(lines)
+                )
+                with VerticalScroll():
+                    yield Static(numbered, id='txt')
+            else:
+                yield Static(
+                    f"PDF: {path.name}\n\n"
+                    "TUI では PDF を直接表示できません。\n\n"
+                    "ブラウザで開くには:\n"
+                    f"  peek -w {path.name}   (Windows)\n"
+                    f"  peek -l {path.name}   (Linux)\n"
+                    f"  peek -m {path.name}   (macOS)\n\n"
+                    "poppler-utils をインストールするとテキスト抽出して表示できます:\n"
+                    "  sudo apt install poppler-utils",
+                    id='pdf-info',
+                )
+            yield Footer()
+
+    PeekApp().run()
+
+
 def _do_update():
     script_dir = os.path.dirname(os.path.abspath(__file__))
     venv_pip = str(Path.home() / ".local" / "share" / "peek-venv" / "bin" / "pip")
@@ -434,7 +525,7 @@ def main():
         sys.exit(0)
 
     # Parse flags
-    platform = _detect_default_platform()
+    platform = None   # None = TUI mode; set by -w/-l/-m for browser mode
     edit_mode = False
     clean_args = []
     for arg in args:
@@ -467,6 +558,15 @@ def main():
         print(f"peek: Unsupported file type '{ext}'")
         print(f"      Supported: {', '.join(sorted(SUPPORTED_EXT))}")
         sys.exit(1)
+
+    # TUI mode: no browser flag and not edit mode
+    if platform is None and not edit_mode:
+        _run_tui(target_file)
+        sys.exit(0)
+
+    # Browser mode: auto-detect platform if only -e was given
+    if platform is None:
+        platform = _detect_default_platform()
 
     port = find_free_port()
     access_token = secrets.token_urlsafe(32)
