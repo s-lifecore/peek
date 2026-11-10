@@ -86,9 +86,12 @@ def open_browser(port):
     print(f"peek: Could not open browser automatically. Visit {url}")
 
 
+MD2PDF_SCRIPT = os.path.expanduser("~/md2pdf/MarkdownToPdf.py")
+
+
 def create_app(target_file):
     try:
-        from flask import Flask, render_template, send_file, abort
+        from flask import Flask, render_template, send_file, abort, jsonify
         import markdown2
     except ImportError as e:
         print(f"peek: Missing dependency — {e}")
@@ -124,6 +127,38 @@ def create_app(target_file):
     @app.route("/raw")
     def serve_raw():
         return send_file(target_file)
+
+    @app.route("/generate-pdf", methods=["POST"])
+    def generate_pdf():
+        path = Path(target_file)
+        output_pdf = path.with_suffix(".pdf")
+
+        if not os.path.exists(MD2PDF_SCRIPT):
+            return jsonify({"success": False, "error": "md2pdf not found at ~/md2pdf/MarkdownToPdf.py"}), 500
+
+        try:
+            result = subprocess.run(
+                ["python3", MD2PDF_SCRIPT, str(path), str(output_pdf)],
+                capture_output=True,
+                text=True,
+                timeout=120,
+            )
+            if result.returncode == 0:
+                return jsonify({"success": True, "filename": output_pdf.name})
+            else:
+                return jsonify({"success": False, "error": result.stderr or result.stdout}), 500
+        except subprocess.TimeoutExpired:
+            return jsonify({"success": False, "error": "PDF generation timed out (120s)"}), 500
+        except Exception as e:
+            return jsonify({"success": False, "error": str(e)}), 500
+
+    @app.route("/download-pdf")
+    def download_pdf():
+        path = Path(target_file)
+        output_pdf = path.with_suffix(".pdf")
+        if not output_pdf.exists():
+            abort(404)
+        return send_file(str(output_pdf), as_attachment=True, download_name=output_pdf.name)
 
     return app
 

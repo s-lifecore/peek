@@ -86,6 +86,60 @@
     .badge-txt { background: var(--accent-txt); color: var(--surface); }
     .badge-pdf { background: var(--accent-pdf); color: var(--surface); }
 
+    /* PDF generate button */
+    .header-right { margin-left: auto; display: flex; align-items: center; gap: 8px; }
+
+    .pdf-gen-btn {
+      padding: 4px 14px;
+      border-radius: 6px;
+      border: 1px solid var(--blue);
+      background: transparent;
+      color: var(--blue);
+      font-size: 12px;
+      font-family: inherit;
+      font-weight: 600;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      transition: background 0.15s, color 0.15s;
+      white-space: nowrap;
+    }
+    .pdf-gen-btn:hover:not(:disabled) { background: var(--blue); color: var(--surface); }
+    .pdf-gen-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+    .pdf-gen-btn.success { border-color: var(--green); color: var(--green); }
+    .pdf-gen-btn.success:hover { background: var(--green); color: var(--surface); }
+    .pdf-gen-btn.error { border-color: var(--red); color: var(--red); }
+
+    .spinner {
+      width: 11px; height: 11px;
+      border: 2px solid currentColor;
+      border-top-color: transparent;
+      border-radius: 50%;
+      animation: spin 0.7s linear infinite;
+      display: none;
+    }
+    .pdf-gen-btn.loading .spinner { display: block; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    .toast {
+      position: fixed;
+      bottom: 24px;
+      right: 24px;
+      padding: 10px 16px;
+      border-radius: 8px;
+      font-size: 13px;
+      font-weight: 500;
+      opacity: 0;
+      transform: translateY(8px);
+      transition: opacity 0.2s, transform 0.2s;
+      pointer-events: none;
+      z-index: 100;
+    }
+    .toast.show { opacity: 1; transform: translateY(0); }
+    .toast.success { background: #1e3a2f; border: 1px solid var(--green); color: var(--green); }
+    .toast.error   { background: #3a1e1e; border: 1px solid var(--red);   color: var(--red); }
+
     /* ───── Main scroll area ───── */
     main {
       flex: 1;
@@ -300,7 +354,18 @@
     {% elif file_type == 'pdf' %}
       <span class="badge badge-pdf">PDF</span>
     {% endif %}
+
+    {% if file_type == 'markdown' %}
+    <div class="header-right">
+      <button class="pdf-gen-btn" id="pdf-gen-btn" onclick="generatePdf()">
+        <span class="spinner"></span>
+        <span class="btn-label">PDF 生成</span>
+      </button>
+    </div>
+    {% endif %}
   </header>
+
+  <div class="toast" id="toast"></div>
 
   <main>
 
@@ -353,6 +418,57 @@
       a.textContent = '#';
       h.appendChild(a);
     });
+
+    // PDF generation
+    function showToast(msg, type) {
+      const t = document.getElementById('toast');
+      t.textContent = msg;
+      t.className = `toast ${type} show`;
+      setTimeout(() => { t.classList.remove('show'); }, 3500);
+    }
+
+    async function generatePdf() {
+      const btn = document.getElementById('pdf-gen-btn');
+      const label = btn.querySelector('.btn-label');
+
+      btn.disabled = true;
+      btn.classList.add('loading');
+      label.textContent = '生成中...';
+
+      try {
+        const res = await fetch('/generate-pdf', { method: 'POST' });
+        const data = await res.json();
+
+        btn.classList.remove('loading');
+
+        if (data.success) {
+          btn.classList.add('success');
+          label.textContent = '完了';
+          showToast(`${data.filename} を生成しました`, 'success');
+          // auto download
+          window.location.href = '/download-pdf';
+          setTimeout(() => {
+            btn.classList.remove('success');
+            label.textContent = 'PDF 生成';
+            btn.disabled = false;
+          }, 3000);
+        } else {
+          btn.classList.add('error');
+          label.textContent = 'エラー';
+          showToast('PDF 生成に失敗しました', 'error');
+          console.error(data.error);
+          setTimeout(() => {
+            btn.classList.remove('error');
+            label.textContent = 'PDF 生成';
+            btn.disabled = false;
+          }, 3000);
+        }
+      } catch (e) {
+        btn.classList.remove('loading');
+        label.textContent = 'エラー';
+        btn.disabled = false;
+      }
+    }
   </script>
   {% endif %}
 
