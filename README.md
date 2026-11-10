@@ -6,6 +6,7 @@ WSL / Linux / macOS ターミナルから `.md` `.txt` `.pdf` を開く CLI ビ�
 ```bash
 peek README.md          # ブラウザで開く（デフォルト）
 peek -t README.md       # TUI で開く
+peek -s                 # 設定画面を開く
 ```
 
 ---
@@ -14,14 +15,18 @@ peek -t README.md       # TUI で開く
 
 - **Markdown レンダリング** — 見出し・表・コードブロック・チェックリストをきれいに表示
 - **TUI モード** — `-t` でターミナルを離れずに表示（textual ベース）
+- **TUI エディタ** — `-t -e` でリアルタイムプレビュー付きの分割エディタ
 - **ブラウザモード** — OS を自動検出し、適切なブラウザで開く
 - **PDF ビューア** — ブラウザのネイティブ PDF ビューア、TUI では pdftotext でテキスト抽出
 - **テキスト表示** — 行番号付きで等幅フォント表示
 - **PDF 生成** — `.md` から PDF を直接生成（pandoc / weasyprint 対応）
 - **ライブ編集モード** — `-e` でサーバーをバックグラウンドに切り離し、ブラウザ上でリアルタイム編集
+- **名前を付けて保存** — ブラウザのネイティブファイルダイアログで保存先を指定
+- **設定画面** — `-s` でテーマ・カラー・キーバインドを TUI で変更
 - **マルチプラットフォーム** — WSL / Linux / macOS に対応
-- **ファイルダウンロード** — Windows はブラウザ経由、Linux / macOS は `~/Downloads/` に保存
-- **セキュリティ** — アクセストークン認証、LFI 防止、セキュリティヘッダー付き
+- **ファイルダウンロード** — Windows は `C:\Users\...\Downloads\` へ、Linux / macOS は `~/Downloads/` に保存
+- **セキュリティ** — アクセストークン認証、XSS・LFI 防止、セキュリティヘッダー付き
+- **もしかして？** — 不明なオプション入力時に近いコマンドを提案
 
 ---
 
@@ -89,16 +94,31 @@ peek -t notes.txt       # 行番号付きテキスト表示
 peek -t document.pdf    # pdftotext でテキスト抽出して表示
 ```
 
-**操作キー:**
+**操作キー（デフォルト設定）:**
 
 | キー | 動作 |
 |------|------|
-| `q` | 終了 |
+| `Ctrl+Q` | 終了 |
 | `↑` `↓` | スクロール |
 | `Page Up` `Page Down` | ページスクロール |
 | `Home` `End` | 先頭 / 末尾 |
 
-### 編集モード
+> キーバインドは `peek -s` で変更できます。Vim スタイル（`:q` / `:q!`）も選択可能です。
+
+### TUI エディタモード
+
+```bash
+peek -t -e README.md    # 左: エディタ、右: Markdown プレビュー（リアルタイム）
+```
+
+**操作キー（デフォルト設定）:**
+
+| キー | 動作 |
+|------|------|
+| `Ctrl+S` | 保存 |
+| `Ctrl+Q` | 終了 |
+
+### 編集モード（ブラウザ）
 
 ```bash
 peek -e README.md
@@ -108,6 +128,23 @@ peek -e README.md
 ブラウザ上でリアルタイム編集・保存ができます（Markdown はプレビュー付き）。  
 終了するにはターミナルに表示された PID を使って `kill <PID>` します。
 
+> **新規ファイル:** 存在しないファイル名を指定すると自動で作成します。
+
+### 設定画面
+
+```bash
+peek -s
+```
+
+TUI の設定画面が起動します。保存すると `~/.config/peek/settings.json` に記録され、次回起動から反映されます。
+
+| 設定項目 | 選択肢 |
+|----------|--------|
+| テーマ | Catppuccin Mocha（デフォルト）/ Latte / Nord / Gruvbox Dark / Tokyo Night / カスタム |
+| カスタムカラー | bg / surface / overlay / text / muted / accent を hex 指定 |
+| 終了キー | Ctrl+Q / q / Escape / Vim（`:q` / `:q!`） |
+| 保存キー | Ctrl+S / F5 / Vim（`:w` / `:wq` / `:x`） |
+
 ---
 
 ## コマンドオプション
@@ -116,10 +153,11 @@ peek -e README.md
 |------------|------|
 | `-t`, `--tui` | ターミナル内 TUI モードで表示 |
 | `-b`, `--browser` | ブラウザで開く（デフォルト・OS 自動検出） |
-| `-w`, `--windows` | ブラウザ: Windows のデフォルトブラウザ・Windows に保存 |
+| `-w`, `--windows` | ブラウザ: Windows のデフォルトブラウザ・Windows Downloads に保存 |
 | `-l`, `--linux` | ブラウザ: Linux のデフォルトブラウザ・`~/Downloads/` に保存 |
 | `-m`, `--mac` | ブラウザ: macOS のデフォルトブラウザ・`~/Downloads/` に保存 |
-| `-e`, `--edit` | 編集モード: バックグラウンドサーバー + ブラウザライブエディタ |
+| `-e`, `--edit` | 編集モード: バックグラウンドサーバー + ブラウザライブエディタ（`-t` と組み合わせで TUI エディタ） |
+| `-s`, `--settings` | TUI 設定画面を開く（単独フラグ） |
 | `--update` | git から最新版を取得して依存関係を更新 |
 | `--help-ja` | 日本語ヘルプを表示 |
 | `--help-en` | 英語ヘルプを表示 |
@@ -158,7 +196,7 @@ kill 12345
 ```
 
 **TUI モード (`peek -t file.md`):**  
-`q` キーで終了します。
+設定した終了キー（デフォルト: `Ctrl+Q`）で終了します。
 
 ---
 
@@ -184,11 +222,13 @@ peek --update
    - macOS: `open <URL>`
 3. `.md` は markdown2 でサーバーサイドレンダリング
 4. アクセストークンによるセッション認証でローカル外からのアクセスを防止
+5. DOMPurify（クライアントサイド）+ HTML サニタイザー（サーバーサイド）で XSS を防止
 
 **TUI モード (`-t`):**
 1. textual がターミナル上に直接レンダリング
 2. `.md` は Markdown ウィジェットでレンダリング、`.txt` は行番号付きスクロール表示
 3. `.pdf` は pdftotext でテキスト抽出して表示（未インストールの場合はブラウザ案内）
+4. `peek -s` で設定したテーマ・キーバインドを反映
 
 WSLg は不要です。
 
@@ -200,7 +240,7 @@ WSLg は不要です。
 - [Flask](https://flask.palletsprojects.com/) — ローカル HTTP サーバー
 - [markdown2](https://github.com/trentm/python-markdown2) — Markdown レンダリング
 - [WeasyPrint](https://weasyprint.org/) — HTML → PDF 変換（PDF 生成機能用）
-- [textual](https://github.com/Textualize/textual) — TUI フレームワーク（`-t` モード用）
+- [textual](https://github.com/Textualize/textual) — TUI フレームワーク（`-t` / `-s` モード用）
 
 セットアップスクリプトが仮想環境を作成し自動でインストールします。  
 PDF 生成は [pandoc](https://pandoc.org/) が入っていれば優先的に使用されます。
@@ -215,24 +255,27 @@ PDF 生成は [pandoc](https://pandoc.org/) が入っていれば優先的に使
 
 ```
 $ peek
-peek 1.6.x  —  ファイルビューア for WSL / Linux / macOS
+peek 1.13.x  —  ファイルビューア for WSL / Linux / macOS
 
   使い方: peek [オプション] <ファイル>
 
-    peek README.md       ブラウザで開く（デフォルト）
-    peek -t README.md    TUI で開く
-    peek -e README.md    ブラウザライブエディタ
+    peek README.md          ブラウザで開く（デフォルト）
+    peek -t README.md       TUI で開く
+    peek -t -e README.md    TUI エディタ（リアルタイムプレビュー）
+    peek -e README.md       ブラウザライブエディタ
+    peek -s                 設定（テーマ・カラー・キーバインド）
 
   詳細: peek --help-ja  /  peek --help-en
 ```
 
 **`peek -list` など存在しないオプションを指定した**
 
-不明なオプションはエラーになります。
+不明なオプションはエラーになり、近いコマンドを提案します（もしかして？）。
 
 ```
-$ peek -list README.md
-peek: 不明なオプション '-list'
+$ peek -tui README.md
+peek: 不明なオプション '-tui'
+      もしかして: --tui
       詳細: peek --help-ja  /  peek --help-en
 ```
 

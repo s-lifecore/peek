@@ -1,0 +1,9 @@
+#!/bin/bash
+# Run peek validation checks before each commit.
+
+REPO_ROOT=$(git rev-parse --show-toplevel)
+VENV="$HOME/.local/share/peek-venv"
+PYTHON="$VENV/bin/python"
+[ -x "$PYTHON" ] || PYTHON=python3
+
+"$PYTHON" "$REPO_ROOT/check.py"
