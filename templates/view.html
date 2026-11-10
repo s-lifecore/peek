@@ -4,21 +4,36 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>{{ filename }}</title>
+
+  {% if file_type == 'markdown' %}
+  <link rel="stylesheet"
+    href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/atom-one-dark.min.css">
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+  {% endif %}
+
   <style>
     :root {
-      --bg: #1e1e2e;
-      --surface: #181825;
-      --text: #cdd6f4;
-      --muted: #6c7086;
-      --accent: #89b4fa;
-      --green: #a6e3a1;
-      --yellow: #f9e2af;
-      --red: #f38ba8;
-      --code-bg: #313244;
-      --border: #313244;
+      --bg:       #1e1e2e;
+      --surface:  #181825;
+      --overlay:  #313244;
+      --text:     #cdd6f4;
+      --subtext:  #a6adc8;
+      --muted:    #6c7086;
+      --blue:     #89b4fa;
+      --green:    #a6e3a1;
+      --yellow:   #f9e2af;
+      --red:      #f38ba8;
+      --mauve:    #cba6f7;
+      --border:   #313244;
+
+      --accent-md:  var(--blue);
+      --accent-txt: var(--green);
+      --accent-pdf: var(--red);
     }
 
-    * { margin: 0; padding: 0; box-sizing: border-box; }
+    *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+
+    html { scroll-behavior: smooth; }
 
     body {
       font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Hiragino Sans", "Yu Gothic UI", sans-serif;
@@ -30,8 +45,19 @@
       overflow: hidden;
     }
 
+    /* ───── Accent bar ───── */
+    .accent-bar {
+      height: 3px;
+      flex-shrink: 0;
+    }
+    .accent-bar.md  { background: var(--accent-md); }
+    .accent-bar.txt { background: var(--accent-txt); }
+    .accent-bar.pdf { background: var(--accent-pdf); }
+
+    /* ───── Header ───── */
     header {
-      padding: 10px 20px;
+      padding: 0 20px;
+      height: 44px;
       background: var(--surface);
       border-bottom: 1px solid var(--border);
       display: flex;
@@ -43,35 +69,45 @@
 
     .filename {
       font-weight: 600;
-      font-size: 14px;
+      font-size: 13.5px;
       color: var(--text);
+      letter-spacing: 0.01em;
     }
 
     .badge {
       padding: 2px 8px;
       border-radius: 4px;
-      font-size: 11px;
+      font-size: 10.5px;
       font-weight: 700;
       text-transform: uppercase;
-      letter-spacing: 0.05em;
+      letter-spacing: 0.08em;
     }
+    .badge-md  { background: var(--accent-md);  color: var(--surface); }
+    .badge-txt { background: var(--accent-txt); color: var(--surface); }
+    .badge-pdf { background: var(--accent-pdf); color: var(--surface); }
 
-    .badge-md   { background: var(--accent); color: var(--surface); }
-    .badge-txt  { background: var(--green);  color: var(--surface); }
-    .badge-pdf  { background: var(--red);    color: var(--surface); }
-
+    /* ───── Main scroll area ───── */
     main {
       flex: 1;
       overflow: auto;
       min-height: 0;
     }
 
+    /* Custom scrollbar */
+    main::-webkit-scrollbar { width: 8px; height: 8px; }
+    main::-webkit-scrollbar-track { background: var(--surface); }
+    main::-webkit-scrollbar-thumb {
+      background: var(--overlay);
+      border-radius: 4px;
+    }
+    main::-webkit-scrollbar-thumb:hover { background: var(--muted); }
+
     /* ───── Markdown ───── */
     .markdown-body {
       max-width: 820px;
       margin: 0 auto;
-      padding: 36px 24px 64px;
-      line-height: 1.75;
+      padding: 40px 28px 72px;
+      line-height: 1.8;
       font-size: 15px;
     }
 
@@ -79,122 +115,162 @@
     .markdown-body h2,
     .markdown-body h3,
     .markdown-body h4 {
-      color: var(--accent);
-      margin-top: 1.6em;
-      margin-bottom: 0.5em;
+      color: var(--blue);
+      margin-top: 1.8em;
+      margin-bottom: 0.6em;
       line-height: 1.3;
+      position: relative;
     }
+    .markdown-body h1 { font-size: 1.9em; border-bottom: 1px solid var(--border); padding-bottom: 0.35em; margin-top: 0; }
+    .markdown-body h2 { font-size: 1.45em; border-bottom: 1px solid var(--border); padding-bottom: 0.25em; }
+    .markdown-body h3 { font-size: 1.2em; color: var(--mauve); }
+    .markdown-body h4 { font-size: 1em;   color: var(--yellow); }
 
-    .markdown-body h1 {
-      font-size: 2em;
-      border-bottom: 1px solid var(--border);
-      padding-bottom: 0.3em;
-      margin-top: 0;
+    /* anchor icon on hover */
+    .markdown-body h1 .anchor,
+    .markdown-body h2 .anchor,
+    .markdown-body h3 .anchor {
+      opacity: 0;
+      margin-left: 8px;
+      font-size: 0.75em;
+      color: var(--muted);
+      text-decoration: none;
+      transition: opacity 0.15s;
     }
-
-    .markdown-body h2 {
-      font-size: 1.5em;
-      border-bottom: 1px solid var(--border);
-      padding-bottom: 0.2em;
-    }
-
-    .markdown-body h3 { font-size: 1.25em; }
-    .markdown-body h4 { font-size: 1em; color: var(--yellow); }
+    .markdown-body h1:hover .anchor,
+    .markdown-body h2:hover .anchor,
+    .markdown-body h3:hover .anchor { opacity: 1; }
 
     .markdown-body p  { margin: 0.9em 0; }
     .markdown-body ul,
-    .markdown-body ol { padding-left: 1.8em; margin: 0.5em 0; }
+    .markdown-body ol { padding-left: 1.8em; margin: 0.6em 0; }
     .markdown-body li { margin: 0.3em 0; }
+    .markdown-body li > ul,
+    .markdown-body li > ol { margin: 0.2em 0; }
 
-    .markdown-body a {
-      color: var(--accent);
-      text-decoration: none;
-    }
+    .markdown-body a { color: var(--blue); text-decoration: none; }
     .markdown-body a:hover { text-decoration: underline; }
 
-    .markdown-body code {
-      background: var(--code-bg);
+    .markdown-body strong { color: var(--text); font-weight: 700; }
+    .markdown-body em { color: var(--subtext); font-style: italic; }
+
+    /* inline code */
+    .markdown-body :not(pre) > code {
+      background: var(--overlay);
       padding: 0.15em 0.45em;
       border-radius: 4px;
       font-family: "Consolas", "JetBrains Mono", "Fira Code", monospace;
-      font-size: 0.9em;
+      font-size: 0.875em;
       color: var(--green);
     }
 
+    /* code block wrapper */
     .markdown-body pre {
-      background: var(--code-bg);
+      position: relative;
+      margin: 1.2em 0;
+      border-radius: 10px;
       border: 1px solid var(--border);
-      border-radius: 8px;
-      padding: 16px 20px;
-      overflow-x: auto;
-      margin: 1em 0;
+      overflow: hidden;
     }
 
-    .markdown-body pre code {
-      background: none;
-      padding: 0;
-      color: var(--text);
+    /* override highlight.js background to match theme */
+    .markdown-body pre > code.hljs {
+      background: #21212e !important;
+      padding: 18px 20px !important;
+      font-family: "Consolas", "JetBrains Mono", "Fira Code", monospace;
       font-size: 0.875em;
-      line-height: 1.6;
+      line-height: 1.65;
+      border-radius: 0;
     }
 
+    /* copy button */
+    .copy-btn {
+      position: absolute;
+      top: 8px;
+      right: 10px;
+      padding: 3px 10px;
+      background: var(--overlay);
+      color: var(--subtext);
+      border: 1px solid var(--muted);
+      border-radius: 5px;
+      font-size: 11px;
+      font-family: inherit;
+      cursor: pointer;
+      opacity: 0;
+      transition: opacity 0.15s, background 0.15s;
+    }
+    .markdown-body pre:hover .copy-btn { opacity: 1; }
+    .copy-btn:hover { background: var(--border); color: var(--text); }
+    .copy-btn.copied { color: var(--green); border-color: var(--green); }
+
+    /* tables */
     .markdown-body table {
       border-collapse: collapse;
       width: 100%;
-      margin: 1.2em 0;
-      font-size: 0.95em;
+      margin: 1.4em 0;
+      font-size: 0.93em;
     }
-
     .markdown-body th,
-    .markdown-body td {
-      border: 1px solid var(--border);
-      padding: 8px 14px;
-      text-align: left;
-    }
+    .markdown-body td { border: 1px solid var(--border); padding: 9px 14px; text-align: left; }
+    .markdown-body th  { background: var(--overlay); font-weight: 600; color: var(--blue); }
+    .markdown-body tr:nth-child(even) { background: rgba(255,255,255,0.025); }
 
-    .markdown-body th {
-      background: var(--code-bg);
-      font-weight: 600;
-      color: var(--accent);
-    }
-
-    .markdown-body tr:nth-child(even) { background: rgba(255,255,255,0.03); }
-
+    /* blockquote */
     .markdown-body blockquote {
-      border-left: 3px solid var(--accent);
-      padding: 4px 0 4px 16px;
-      color: var(--muted);
-      margin: 1em 0;
+      border-left: 3px solid var(--blue);
+      padding: 6px 0 6px 18px;
+      color: var(--subtext);
+      margin: 1.2em 0;
       font-style: italic;
     }
 
-    .markdown-body hr {
-      border: none;
-      border-top: 1px solid var(--border);
-      margin: 2em 0;
-    }
+    /* hr */
+    .markdown-body hr { border: none; border-top: 1px solid var(--border); margin: 2.2em 0; }
 
-    .markdown-body img {
-      max-width: 100%;
-      border-radius: 6px;
-    }
+    /* images */
+    .markdown-body img { max-width: 100%; border-radius: 8px; margin: 0.5em 0; }
 
     /* task list */
-    .markdown-body input[type="checkbox"] {
-      margin-right: 6px;
-      accent-color: var(--accent);
+    .markdown-body input[type="checkbox"] { margin-right: 6px; accent-color: var(--blue); }
+
+    /* ───── Plain text with line numbers ───── */
+    .text-table {
+      width: 100%;
+      border-collapse: collapse;
+      font-family: "Consolas", "JetBrains Mono", "Fira Code", monospace;
+      font-size: 13.5px;
+      line-height: 1.65;
     }
 
-    /* ───── Plain text ───── */
-    .text-body {
-      padding: 28px 32px;
-      font-family: "Consolas", "JetBrains Mono", "Courier New", monospace;
-      font-size: 14px;
-      line-height: 1.7;
-      white-space: pre-wrap;
-      word-break: break-word;
+    .text-table tr:hover { background: rgba(255,255,255,0.03); }
+
+    .line-num {
+      width: 1%;
+      min-width: 48px;
+      padding: 0 16px 0 20px;
+      text-align: right;
+      color: var(--muted);
+      border-right: 1px solid var(--border);
+      user-select: none;
+      white-space: nowrap;
+      font-size: 12px;
+      vertical-align: top;
+      padding-top: 1px;
+    }
+
+    .line-content {
+      padding: 0 24px;
+      white-space: pre;
       color: var(--text);
-      tab-size: 4;
+      word-break: break-word;
+    }
+
+    .text-header {
+      padding: 14px 20px 10px;
+      color: var(--muted);
+      font-family: "Consolas", "JetBrains Mono", monospace;
+      font-size: 12px;
+      border-bottom: 1px solid var(--border);
     }
 
     /* ───── PDF ───── */
@@ -208,6 +284,13 @@
   </style>
 </head>
 <body>
+
+  <div class="accent-bar
+    {%- if file_type == 'markdown' %} md
+    {%- elif file_type == 'text' %} txt
+    {%- elif file_type == 'pdf' %} pdf
+    {%- endif %}"></div>
+
   <header>
     <span class="filename">{{ filename }}</span>
     {% if file_type == 'markdown' %}
@@ -220,6 +303,7 @@
   </header>
 
   <main>
+
     {% if file_type == 'pdf' %}
       <iframe class="pdf-frame" src="/raw"></iframe>
 
@@ -227,9 +311,80 @@
       <div class="markdown-body">{{ content | safe }}</div>
 
     {% elif file_type == 'text' %}
-      <pre class="text-body">{{ content }}</pre>
+      <div class="text-header">{{ filename }}</div>
+      <pre class="text-body" style="display:none">{{ content }}</pre>
+      <table class="text-table" id="text-table"></table>
 
     {% endif %}
+
   </main>
+
+  {% if file_type == 'markdown' %}
+  <script>
+    // Syntax highlighting
+    hljs.highlightAll();
+
+    // Copy buttons
+    document.querySelectorAll('.markdown-body pre').forEach(pre => {
+      const btn = document.createElement('button');
+      btn.className = 'copy-btn';
+      btn.textContent = 'Copy';
+      btn.addEventListener('click', () => {
+        const code = pre.querySelector('code');
+        navigator.clipboard.writeText(code.innerText).then(() => {
+          btn.textContent = 'Copied!';
+          btn.classList.add('copied');
+          setTimeout(() => {
+            btn.textContent = 'Copy';
+            btn.classList.remove('copied');
+          }, 1800);
+        });
+      });
+      pre.appendChild(btn);
+    });
+
+    // Heading anchor links
+    document.querySelectorAll('.markdown-body h1, .markdown-body h2, .markdown-body h3').forEach(h => {
+      const id = h.id;
+      if (!id) return;
+      const a = document.createElement('a');
+      a.className = 'anchor';
+      a.href = '#' + id;
+      a.textContent = '#';
+      h.appendChild(a);
+    });
+  </script>
+  {% endif %}
+
+  {% if file_type == 'text' %}
+  <script>
+    // Build line-number table from pre content
+    const pre = document.querySelector('.text-body');
+    const table = document.getElementById('text-table');
+    const raw = pre.textContent;
+    const lines = raw.endsWith('\n') ? raw.slice(0, -1).split('\n') : raw.split('\n');
+
+    const fragment = document.createDocumentFragment();
+    lines.forEach((line, i) => {
+      const tr = document.createElement('tr');
+
+      const numTd = document.createElement('td');
+      numTd.className = 'line-num';
+      numTd.textContent = i + 1;
+
+      const codeTd = document.createElement('td');
+      codeTd.className = 'line-content';
+      codeTd.textContent = line;
+
+      tr.appendChild(numTd);
+      tr.appendChild(codeTd);
+      fragment.appendChild(tr);
+    });
+
+    table.appendChild(fragment);
+    pre.remove();
+  </script>
+  {% endif %}
+
 </body>
 </html>
