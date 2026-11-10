@@ -3,6 +3,7 @@
 
 import sys
 import os
+import secrets
 import subprocess
 import threading
 import time
@@ -11,6 +12,7 @@ from pathlib import Path
 
 SUPPORTED_EXT = {'.md', '.markdown', '.txt', '.pdf'}
 VERSION = "1.0.0"
+MAX_FILE_BYTES = 10 * 1024 * 1024  # 10 MB
 
 HELP_EN = """peek {version} - GUI file viewer for WSL terminals
 
@@ -70,9 +72,9 @@ def find_free_port(start=8899):
     raise RuntimeError("No free port available in range 8899-8999")
 
 
-def open_browser(port):
+def open_browser(port, token):
     time.sleep(0.8)
-    url = f"http://localhost:{port}"
+    url = f"http://localhost:{port}/?token={token}"
     for cmd in [
         ["cmd.exe", "/c", "start", "", url],
         ["wslview", url],
@@ -84,6 +86,29 @@ def open_browser(port):
         except FileNotFoundError:
             continue
     print(f"peek: Could not open browser automatically. Visit {url}")
+
+
+def _sanitize_error(msg):
+    """Remove filesystem paths from error messages."""
+    home = os.path.expanduser("~")
+    return msg.replace(home, "~") if home != "~" else msg
+
+
+def _make_restricted_fetcher(allowed_dir):
+    """Return a weasyprint URL fetcher that blocks file:// outside allowed_dir."""
+    from weasyprint import URLFetcher
+    allowed = os.path.realpath(allowed_dir)
+
+    class RestrictedFetcher(URLFetcher):
+        def __call__(self, url, **kwargs):
+            if url.startswith("file://"):
+                raw = url[len("file://"):]
+                real = os.path.realpath(raw)
+                if real != allowed and not real.startswith(allowed + os.sep):
+                    raise ValueError("Access denied: path outside allowed directory")
+            return super().__call__(url, **kwargs)
+
+    return RestrictedFetcher()
 
 
 PRINT_CSS = """
@@ -135,9 +160,11 @@ def _pdf_via_weasyprint(md_path, output_path, rendered_html):
     html = f"""<!DOCTYPE html>
 <html><head><meta charset="UTF-8"></head>
 <body>{rendered_html}</body></html>"""
-    HTML(string=html, base_url=str(Path(md_path).parent)).write_pdf(
+    allowed_dir = str(Path(md_path).parent)
+    HTML(string=html, base_url=allowed_dir).write_pdf(
         str(output_path),
         stylesheets=[CSS(string=PRINT_CSS)],
+        url_fetcher=_make_restricted_fetcher(allowed_dir),
     )
 
 
@@ -154,9 +181,9 @@ def _pdf_via_pandoc(md_path, output_path):
     raise RuntimeError(result.stderr or "pandoc failed")
 
 
-def create_app(target_file):
+def create_app(target_file, access_token):
     try:
-        from flask import Flask, render_template, send_file, abort, jsonify
+        from flask import Flask, render_template, send_file, abort, jsonify, request, make_response
         import markdown2
     except ImportError as e:
         print(f"peek: Missing dependency — {e}")
@@ -165,11 +192,47 @@ def create_app(target_file):
 
     template_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "templates")
     app = Flask(__name__, template_folder=template_dir)
+    app.config["MAX_CONTENT_LENGTH"] = MAX_FILE_BYTES
+
+    # ── Token validation ──────────────────────────────────────────────────────
+
+    def _valid_token(req):
+        return (
+            req.cookies.get("peek_token") == access_token
+            or req.args.get("token") == access_token
+        )
+
+    @app.before_request
+    def enforce_token():
+        if not _valid_token(request):
+            abort(403)
+
+    @app.after_request
+    def apply_security_headers(response):
+        # Promote query-param token to cookie on first valid visit
+        if request.args.get("token") == access_token:
+            response.set_cookie(
+                "peek_token", access_token,
+                httponly=True, samesite="Strict", max_age=86400,
+            )
+        response.headers["X-Content-Type-Options"] = "nosniff"
+        response.headers["X-Frame-Options"] = "SAMEORIGIN"
+        response.headers["Cache-Control"] = "no-store"
+        return response
+
+    # ── File size guard ───────────────────────────────────────────────────────
+
+    def _check_size(path):
+        if path.stat().st_size > MAX_FILE_BYTES:
+            abort(413)
+
+    # ── Routes ────────────────────────────────────────────────────────────────
 
     @app.route("/")
     def view():
         path = Path(target_file)
         ext = path.suffix.lower()
+        _check_size(path)
 
         if ext == ".pdf":
             return render_template("view.html", file_type="pdf", filename=path.name, content="")
@@ -191,11 +254,13 @@ def create_app(target_file):
 
     @app.route("/raw")
     def serve_raw():
+        _check_size(Path(target_file))
         return send_file(target_file)
 
     @app.route("/generate-pdf", methods=["POST"])
     def generate_pdf():
         path = Path(target_file)
+        _check_size(path)
         output_pdf = path.with_suffix(".pdf")
 
         content = path.read_text(encoding="utf-8")
@@ -205,7 +270,6 @@ def create_app(target_file):
         )
 
         try:
-            # prefer pandoc when available (better CJK / math support)
             if subprocess.run(["which", "pandoc"], capture_output=True).returncode == 0:
                 _pdf_via_pandoc(str(path), str(output_pdf))
             else:
@@ -213,13 +277,12 @@ def create_app(target_file):
             return jsonify({"success": True, "filename": output_pdf.name})
         except subprocess.TimeoutExpired:
             return jsonify({"success": False, "error": "PDF generation timed out (120s)"}), 500
-        except Exception as e:
-            # pandoc failed (e.g. no LaTeX) → retry with weasyprint
+        except Exception:
             try:
                 _pdf_via_weasyprint(str(path), str(output_pdf), rendered)
                 return jsonify({"success": True, "filename": output_pdf.name})
             except Exception as e2:
-                return jsonify({"success": False, "error": str(e2)}), 500
+                return jsonify({"success": False, "error": _sanitize_error(str(e2))}), 500
 
     @app.route("/download-pdf")
     def download_pdf():
@@ -266,13 +329,14 @@ def main():
         sys.exit(1)
 
     port = find_free_port()
-    app = create_app(target_file)
+    access_token = secrets.token_urlsafe(32)
+    app = create_app(target_file, access_token)
 
     print(f"peek: {Path(target_file).name}")
-    print(f"      http://localhost:{port}")
+    print(f"      http://localhost:{port}/?token=***")
     print("      Ctrl+C to close")
 
-    threading.Thread(target=open_browser, args=(port,), daemon=True).start()
+    threading.Thread(target=open_browser, args=(port, access_token), daemon=True).start()
 
     import logging
     logging.getLogger("werkzeug").setLevel(logging.ERROR)
