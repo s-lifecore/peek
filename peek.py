@@ -86,7 +86,72 @@ def open_browser(port):
     print(f"peek: Could not open browser automatically. Visit {url}")
 
 
-MD2PDF_SCRIPT = os.path.expanduser("~/md2pdf/MarkdownToPdf.py")
+PRINT_CSS = """
+body {
+    font-family: "Hiragino Sans", "Yu Gothic", "Noto Sans CJK JP", sans-serif;
+    font-size: 11pt;
+    line-height: 1.8;
+    color: #1a1a1a;
+    max-width: 740px;
+    margin: 0 auto;
+    padding: 0 1cm;
+}
+h1, h2, h3, h4 { color: #111; line-height: 1.3; margin-top: 1.5em; margin-bottom: 0.5em; }
+h1 { font-size: 1.9em; border-bottom: 2px solid #ddd; padding-bottom: 0.3em; margin-top: 0; }
+h2 { font-size: 1.45em; border-bottom: 1px solid #eee; padding-bottom: 0.2em; }
+h3 { font-size: 1.2em; }
+p  { margin: 0.9em 0; }
+ul, ol { padding-left: 1.8em; margin: 0.5em 0; }
+li { margin: 0.25em 0; }
+a  { color: #0969da; }
+code {
+    background: #f4f4f5;
+    padding: 0.15em 0.4em;
+    border-radius: 4px;
+    font-family: "Consolas", "JetBrains Mono", monospace;
+    font-size: 0.875em;
+}
+pre {
+    background: #f4f4f5;
+    border: 1px solid #e1e4e8;
+    border-radius: 6px;
+    padding: 14px 16px;
+    overflow-x: auto;
+    margin: 1em 0;
+}
+pre code { background: none; padding: 0; font-size: 0.875em; }
+table { border-collapse: collapse; width: 100%; margin: 1em 0; font-size: 0.95em; }
+th, td { border: 1px solid #d0d7de; padding: 8px 12px; text-align: left; }
+th { background: #f4f4f5; font-weight: 600; }
+tr:nth-child(even) { background: #fafafa; }
+blockquote { border-left: 3px solid #0969da; padding: 4px 0 4px 16px; color: #555; margin: 1em 0; }
+hr { border: none; border-top: 1px solid #e1e4e8; margin: 2em 0; }
+img { max-width: 100%; }
+"""
+
+
+def _pdf_via_weasyprint(md_path, output_path, rendered_html):
+    from weasyprint import HTML, CSS
+    html = f"""<!DOCTYPE html>
+<html><head><meta charset="UTF-8"></head>
+<body>{rendered_html}</body></html>"""
+    HTML(string=html, base_url=str(Path(md_path).parent)).write_pdf(
+        str(output_path),
+        stylesheets=[CSS(string=PRINT_CSS)],
+    )
+
+
+def _pdf_via_pandoc(md_path, output_path):
+    engines = ["xelatex", "lualatex", "pdflatex", None]
+    for engine in engines:
+        cmd = ["pandoc", str(md_path), "-o", str(output_path),
+               "--variable=geometry:margin=2cm", "--variable=fontsize=11pt"]
+        if engine:
+            cmd += [f"--pdf-engine={engine}"]
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
+        if result.returncode == 0:
+            return
+    raise RuntimeError(result.stderr or "pandoc failed")
 
 
 def create_app(target_file):
@@ -133,24 +198,28 @@ def create_app(target_file):
         path = Path(target_file)
         output_pdf = path.with_suffix(".pdf")
 
-        if not os.path.exists(MD2PDF_SCRIPT):
-            return jsonify({"success": False, "error": "md2pdf not found at ~/md2pdf/MarkdownToPdf.py"}), 500
+        content = path.read_text(encoding="utf-8")
+        rendered = markdown2.markdown(
+            content,
+            extras=["fenced-code-blocks", "tables", "strike", "task_list", "header-ids"],
+        )
 
         try:
-            result = subprocess.run(
-                ["python3", MD2PDF_SCRIPT, str(path), str(output_pdf)],
-                capture_output=True,
-                text=True,
-                timeout=120,
-            )
-            if result.returncode == 0:
-                return jsonify({"success": True, "filename": output_pdf.name})
+            # prefer pandoc when available (better CJK / math support)
+            if subprocess.run(["which", "pandoc"], capture_output=True).returncode == 0:
+                _pdf_via_pandoc(str(path), str(output_pdf))
             else:
-                return jsonify({"success": False, "error": result.stderr or result.stdout}), 500
+                _pdf_via_weasyprint(str(path), str(output_pdf), rendered)
+            return jsonify({"success": True, "filename": output_pdf.name})
         except subprocess.TimeoutExpired:
             return jsonify({"success": False, "error": "PDF generation timed out (120s)"}), 500
         except Exception as e:
-            return jsonify({"success": False, "error": str(e)}), 500
+            # pandoc failed (e.g. no LaTeX) → retry with weasyprint
+            try:
+                _pdf_via_weasyprint(str(path), str(output_pdf), rendered)
+                return jsonify({"success": True, "filename": output_pdf.name})
+            except Exception as e2:
+                return jsonify({"success": False, "error": str(e2)}), 500
 
     @app.route("/download-pdf")
     def download_pdf():
