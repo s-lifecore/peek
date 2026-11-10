@@ -86,15 +86,25 @@
     .badge-txt { background: var(--accent-txt); color: var(--surface); }
     .badge-pdf { background: var(--accent-pdf); color: var(--surface); }
 
-    /* PDF generate button */
+    /* Header right: buttons */
     .header-right { margin-left: auto; display: flex; align-items: center; gap: 8px; }
 
-    .pdf-gen-btn {
+    .save-mode-badge {
+      font-size: 10px;
+      font-weight: 600;
+      padding: 2px 7px;
+      border-radius: 4px;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+      border: 1px solid var(--muted);
+      color: var(--muted);
+    }
+
+    .header-btn {
       padding: 4px 14px;
       border-radius: 6px;
-      border: 1px solid var(--blue);
+      border: 1px solid;
       background: transparent;
-      color: var(--blue);
       font-size: 12px;
       font-family: inherit;
       font-weight: 600;
@@ -105,11 +115,17 @@
       transition: background 0.15s, color 0.15s;
       white-space: nowrap;
     }
+    .header-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+    .dl-btn   { border-color: var(--green); color: var(--green); }
+    .dl-btn:hover:not(:disabled)  { background: var(--green);  color: var(--surface); }
+
+    .pdf-gen-btn { border-color: var(--blue); color: var(--blue); }
     .pdf-gen-btn:hover:not(:disabled) { background: var(--blue); color: var(--surface); }
-    .pdf-gen-btn:disabled { opacity: 0.5; cursor: not-allowed; }
-    .pdf-gen-btn.success { border-color: var(--green); color: var(--green); }
-    .pdf-gen-btn.success:hover { background: var(--green); color: var(--surface); }
-    .pdf-gen-btn.error { border-color: var(--red); color: var(--red); }
+
+    .header-btn.success { border-color: var(--green); color: var(--green); }
+    .header-btn.success:hover { background: var(--green); color: var(--surface); }
+    .header-btn.error   { border-color: var(--red);   color: var(--red); }
 
     .spinner {
       width: 11px; height: 11px;
@@ -119,7 +135,7 @@
       animation: spin 0.7s linear infinite;
       display: none;
     }
-    .pdf-gen-btn.loading .spinner { display: block; }
+    .header-btn.loading .spinner { display: block; }
     @keyframes spin { to { transform: rotate(360deg); } }
 
     .toast {
@@ -355,14 +371,23 @@
       <span class="badge badge-pdf">PDF</span>
     {% endif %}
 
-    {% if file_type == 'markdown' %}
     <div class="header-right">
-      <button class="pdf-gen-btn" id="pdf-gen-btn" onclick="generatePdf()">
+      <span class="save-mode-badge">
+        {%- if save_mode == 'linux' %}Linux{%- else %}Windows{%- endif %}
+      </span>
+
+      <button class="header-btn dl-btn" id="dl-btn" onclick="downloadSource()">
+        <span class="spinner"></span>
+        <span class="btn-label">保存</span>
+      </button>
+
+      {% if file_type == 'markdown' %}
+      <button class="header-btn pdf-gen-btn" id="pdf-gen-btn" onclick="generatePdf()">
         <span class="spinner"></span>
         <span class="btn-label">PDF 生成</span>
       </button>
+      {% endif %}
     </div>
-    {% endif %}
   </header>
 
   <div class="toast" id="toast"></div>
@@ -419,7 +444,8 @@
       h.appendChild(a);
     });
 
-    // PDF generation
+    const SAVE_MODE = "{{ save_mode }}";
+
     function showToast(msg, type) {
       const t = document.getElementById('toast');
       t.textContent = msg;
@@ -427,10 +453,48 @@
       setTimeout(() => { t.classList.remove('show'); }, 3500);
     }
 
+    function resetBtn(btn, label, originalText) {
+      btn.classList.remove('loading', 'success', 'error');
+      label.textContent = originalText;
+      btn.disabled = false;
+    }
+
+    async function downloadSource() {
+      const btn = document.getElementById('dl-btn');
+      const label = btn.querySelector('.btn-label');
+      btn.disabled = true;
+      btn.classList.add('loading');
+      label.textContent = '保存中...';
+
+      try {
+        if (SAVE_MODE === 'linux') {
+          const res = await fetch('/download');
+          const data = await res.json();
+          btn.classList.remove('loading');
+          if (data.success) {
+            btn.classList.add('success');
+            label.textContent = '完了';
+            showToast(`保存: ${data.path}`, 'success');
+            setTimeout(() => resetBtn(btn, label, '保存'), 3000);
+          } else {
+            btn.classList.add('error');
+            label.textContent = 'エラー';
+            setTimeout(() => resetBtn(btn, label, '保存'), 3000);
+          }
+        } else {
+          // Windows: browser handles the download, restore button after short delay
+          window.location.href = '/download';
+          setTimeout(() => resetBtn(btn, label, '保存'), 1500);
+        }
+      } catch (e) {
+        btn.classList.remove('loading');
+        resetBtn(btn, label, '保存');
+      }
+    }
+
     async function generatePdf() {
       const btn = document.getElementById('pdf-gen-btn');
       const label = btn.querySelector('.btn-label');
-
       btn.disabled = true;
       btn.classList.add('loading');
       label.textContent = '生成中...';
@@ -438,35 +502,28 @@
       try {
         const res = await fetch('/generate-pdf', { method: 'POST' });
         const data = await res.json();
-
         btn.classList.remove('loading');
 
         if (data.success) {
           btn.classList.add('success');
           label.textContent = '完了';
-          showToast(`${data.filename} を生成しました`, 'success');
-          // auto download
-          window.location.href = '/download-pdf';
-          setTimeout(() => {
-            btn.classList.remove('success');
-            label.textContent = 'PDF 生成';
-            btn.disabled = false;
-          }, 3000);
+          if (data.save_mode === 'linux') {
+            showToast(`保存: ${data.path}`, 'success');
+          } else {
+            showToast(`${data.filename} を生成しました`, 'success');
+            window.location.href = '/download-pdf';
+          }
+          setTimeout(() => resetBtn(btn, label, 'PDF 生成'), 3000);
         } else {
           btn.classList.add('error');
           label.textContent = 'エラー';
           showToast('PDF 生成に失敗しました', 'error');
           console.error(data.error);
-          setTimeout(() => {
-            btn.classList.remove('error');
-            label.textContent = 'PDF 生成';
-            btn.disabled = false;
-          }, 3000);
+          setTimeout(() => resetBtn(btn, label, 'PDF 生成'), 3000);
         }
       } catch (e) {
         btn.classList.remove('loading');
-        label.textContent = 'エラー';
-        btn.disabled = false;
+        resetBtn(btn, label, 'PDF 生成');
       }
     }
   </script>

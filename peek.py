@@ -3,6 +3,7 @@
 
 import sys
 import os
+import shutil
 import secrets
 import subprocess
 import threading
@@ -17,10 +18,14 @@ MAX_FILE_BYTES = 10 * 1024 * 1024  # 10 MB
 HELP_EN = """peek {version} - GUI file viewer for WSL terminals
 
 USAGE:
-  peek <file>           Open a file in the browser
-  peek --help-en        Show this help (English)
-  peek --help-ja        Show help in Japanese
-  peek --version        Show version
+  peek [options] <file>
+
+OPTIONS:
+  -w, --windows         Save downloads to Windows (default)
+  -l, --linux           Save downloads to Linux ~/Downloads/
+  --help-en             Show this help (English)
+  --help-ja             Show help in Japanese
+  --version             Show version
 
 SUPPORTED FILE TYPES:
   .md / .markdown       Rendered Markdown with code highlighting
@@ -29,8 +34,8 @@ SUPPORTED FILE TYPES:
 
 EXAMPLES:
   peek README.md
-  peek notes.txt
-  peek document.pdf
+  peek -l notes.txt
+  peek --windows document.pdf
 
 HOW IT WORKS:
   Starts a local web server and opens your Windows browser.
@@ -40,10 +45,14 @@ HOW IT WORKS:
 HELP_JA = """peek {version} - WSL ターミナル用 GUI ファイルビューア
 
 使い方:
-  peek <ファイル>         ブラウザでファイルを開く
-  peek --help-en         英語のヘルプを表示
-  peek --help-ja         このヘルプを表示（日本語）
-  peek --version         バージョンを表示
+  peek [オプション] <ファイル>
+
+オプション:
+  -w, --windows         Windows に保存（デフォルト）
+  -l, --linux           Linux の ~/Downloads/ に保存
+  --help-en             英語のヘルプを表示
+  --help-ja             このヘルプを表示（日本語）
+  --version             バージョンを表示
 
 対応ファイル形式:
   .md / .markdown        コードハイライト付きマークダウンレンダリング
@@ -52,8 +61,8 @@ HELP_JA = """peek {version} - WSL ターミナル用 GUI ファイルビュー�
 
 使用例:
   peek README.md
-  peek notes.txt
-  peek document.pdf
+  peek -l notes.txt
+  peek --windows document.pdf
 
 仕組み:
   ローカルウェブサーバーを起動し、Windows ブラウザで自動的に開きます。
@@ -89,9 +98,17 @@ def open_browser(port, token):
 
 
 def _sanitize_error(msg):
-    """Remove filesystem paths from error messages."""
     home = os.path.expanduser("~")
     return msg.replace(home, "~") if home != "~" else msg
+
+
+def _linux_save(src_path, filename=None):
+    """Copy src_path to ~/Downloads/, return destination path string."""
+    downloads = Path.home() / "Downloads"
+    downloads.mkdir(exist_ok=True)
+    dest = downloads / (filename or Path(src_path).name)
+    shutil.copy2(str(src_path), str(dest))
+    return str(dest)
 
 
 def _make_restricted_fetcher(allowed_dir):
@@ -130,19 +147,15 @@ ul, ol { padding-left: 1.8em; margin: 0.5em 0; }
 li { margin: 0.25em 0; }
 a  { color: #0969da; }
 code {
-    background: #f4f4f5;
-    padding: 0.15em 0.4em;
+    background: #f4f4f5; padding: 0.15em 0.4em;
     border-radius: 4px;
     font-family: "Consolas", "JetBrains Mono", monospace;
     font-size: 0.875em;
 }
 pre {
-    background: #f4f4f5;
-    border: 1px solid #e1e4e8;
-    border-radius: 6px;
-    padding: 14px 16px;
-    overflow-x: auto;
-    margin: 1em 0;
+    background: #f4f4f5; border: 1px solid #e1e4e8;
+    border-radius: 6px; padding: 14px 16px;
+    overflow-x: auto; margin: 1em 0;
 }
 pre code { background: none; padding: 0; font-size: 0.875em; }
 table { border-collapse: collapse; width: 100%; margin: 1em 0; font-size: 0.95em; }
@@ -181,9 +194,9 @@ def _pdf_via_pandoc(md_path, output_path):
     raise RuntimeError(result.stderr or "pandoc failed")
 
 
-def create_app(target_file, access_token):
+def create_app(target_file, access_token, save_mode="windows"):
     try:
-        from flask import Flask, render_template, send_file, abort, jsonify, request, make_response
+        from flask import Flask, render_template, send_file, abort, jsonify, request
         import markdown2
     except ImportError as e:
         print(f"peek: Missing dependency — {e}")
@@ -209,7 +222,6 @@ def create_app(target_file, access_token):
 
     @app.after_request
     def apply_security_headers(response):
-        # Promote query-param token to cookie on first valid visit
         if request.args.get("token") == access_token:
             response.set_cookie(
                 "peek_token", access_token,
@@ -220,11 +232,18 @@ def create_app(target_file, access_token):
         response.headers["Cache-Control"] = "no-store"
         return response
 
-    # ── File size guard ───────────────────────────────────────────────────────
+    # ── Helpers ───────────────────────────────────────────────────────────────
 
     def _check_size(path):
         if path.stat().st_size > MAX_FILE_BYTES:
             abort(413)
+
+    def _render_md(path):
+        content = path.read_text(encoding="utf-8")
+        return markdown2.markdown(
+            content,
+            extras=["fenced-code-blocks", "tables", "strike", "task_list", "header-ids"],
+        )
 
     # ── Routes ────────────────────────────────────────────────────────────────
 
@@ -235,20 +254,15 @@ def create_app(target_file, access_token):
         _check_size(path)
 
         if ext == ".pdf":
-            return render_template("view.html", file_type="pdf", filename=path.name, content="")
-
+            return render_template("view.html", file_type="pdf",
+                                   filename=path.name, content="", save_mode=save_mode)
         elif ext in (".md", ".markdown"):
-            content = path.read_text(encoding="utf-8")
-            rendered = markdown2.markdown(
-                content,
-                extras=["fenced-code-blocks", "tables", "strike", "task_list", "header-ids"],
-            )
-            return render_template("view.html", file_type="markdown", filename=path.name, content=rendered)
-
+            return render_template("view.html", file_type="markdown",
+                                   filename=path.name, content=_render_md(path), save_mode=save_mode)
         elif ext == ".txt":
             content = path.read_text(encoding="utf-8")
-            return render_template("view.html", file_type="text", filename=path.name, content=content)
-
+            return render_template("view.html", file_type="text",
+                                   filename=path.name, content=content, save_mode=save_mode)
         else:
             abort(415)
 
@@ -257,35 +271,45 @@ def create_app(target_file, access_token):
         _check_size(Path(target_file))
         return send_file(target_file)
 
+    @app.route("/download")
+    def download():
+        """Download the source file (windows: browser DL / linux: ~/Downloads/)."""
+        path = Path(target_file)
+        _check_size(path)
+        if save_mode == "linux":
+            dest = _linux_save(str(path))
+            return jsonify({"success": True, "path": dest})
+        return send_file(str(path), as_attachment=True, download_name=path.name)
+
     @app.route("/generate-pdf", methods=["POST"])
     def generate_pdf():
         path = Path(target_file)
         _check_size(path)
         output_pdf = path.with_suffix(".pdf")
-
-        content = path.read_text(encoding="utf-8")
-        rendered = markdown2.markdown(
-            content,
-            extras=["fenced-code-blocks", "tables", "strike", "task_list", "header-ids"],
-        )
+        rendered = _render_md(path)
 
         try:
             if subprocess.run(["which", "pandoc"], capture_output=True).returncode == 0:
                 _pdf_via_pandoc(str(path), str(output_pdf))
             else:
                 _pdf_via_weasyprint(str(path), str(output_pdf), rendered)
-            return jsonify({"success": True, "filename": output_pdf.name})
         except subprocess.TimeoutExpired:
             return jsonify({"success": False, "error": "PDF generation timed out (120s)"}), 500
         except Exception:
             try:
                 _pdf_via_weasyprint(str(path), str(output_pdf), rendered)
-                return jsonify({"success": True, "filename": output_pdf.name})
             except Exception as e2:
                 return jsonify({"success": False, "error": _sanitize_error(str(e2))}), 500
 
+        if save_mode == "linux":
+            # PDF is already in the Linux filesystem next to the .md file
+            return jsonify({"success": True, "filename": output_pdf.name,
+                            "path": str(output_pdf), "save_mode": "linux"})
+        return jsonify({"success": True, "filename": output_pdf.name, "save_mode": "windows"})
+
     @app.route("/download-pdf")
     def download_pdf():
+        """Send generated PDF to browser (windows mode only)."""
         path = Path(target_file)
         output_pdf = path.with_suffix(".pdf")
         if not output_pdf.exists():
@@ -314,6 +338,22 @@ def main():
         print(f"peek {VERSION}")
         sys.exit(0)
 
+    # Parse -l / -w flags
+    save_mode = "windows"
+    clean_args = []
+    for arg in args:
+        if arg in ("-l", "--linux"):
+            save_mode = "linux"
+        elif arg in ("-w", "--windows"):
+            save_mode = "windows"
+        else:
+            clean_args.append(arg)
+    args = clean_args
+
+    if not args:
+        print("peek: No file specified. Try 'peek --help-en' or 'peek --help-ja'")
+        sys.exit(1)
+
     file_path = args[0]
 
     if not os.path.exists(file_path):
@@ -330,9 +370,10 @@ def main():
 
     port = find_free_port()
     access_token = secrets.token_urlsafe(32)
-    app = create_app(target_file, access_token)
+    app = create_app(target_file, access_token, save_mode)
 
-    print(f"peek: {Path(target_file).name}")
+    mode_label = "Linux ~/Downloads/" if save_mode == "linux" else "Windows"
+    print(f"peek: {Path(target_file).name}  [{mode_label}]")
     print(f"      http://localhost:{port}/?token=***")
     print("      Ctrl+C to close")
 
