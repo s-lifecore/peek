@@ -1,0 +1,47 @@
+#!/bin/bash
+# Auto-bump VERSION in peek.py based on conventional commit prefix.
+#
+# feat:            → minor bump  (1.3.0 → 1.4.0)
+# fix: / docs: /
+# refactor: etc.   → patch bump  (1.3.0 → 1.3.1)
+# BREAKING: /
+# major:           → major bump  (1.3.0 → 2.0.0)
+
+COMMIT_MSG=$(cat "$1")
+REPO_ROOT=$(git rev-parse --show-toplevel)
+PEEK_FILE="$REPO_ROOT/peek.py"
+
+# Skip if peek.py doesn't exist
+[ -f "$PEEK_FILE" ] || exit 0
+
+# Skip merge / revert commits
+echo "$COMMIT_MSG" | grep -qE "^(Merge|Revert)" && exit 0
+
+# Read current version
+CURRENT=$(grep -oP 'VERSION = "\K[0-9]+\.[0-9]+\.[0-9]+' "$PEEK_FILE")
+[ -z "$CURRENT" ] && exit 0
+
+MAJOR=$(echo "$CURRENT" | cut -d. -f1)
+MINOR=$(echo "$CURRENT" | cut -d. -f2)
+PATCH=$(echo "$CURRENT" | cut -d. -f3)
+
+# Determine bump type
+FIRST_LINE=$(echo "$COMMIT_MSG" | head -1)
+
+if echo "$FIRST_LINE" | grep -qiE "^(BREAKING|major)(\(.+\))?[!:]"; then
+    MAJOR=$((MAJOR + 1)); MINOR=0; PATCH=0
+elif echo "$FIRST_LINE" | grep -qE "^feat(\(.+\))?[!:]"; then
+    MINOR=$((MINOR + 1)); PATCH=0
+else
+    PATCH=$((PATCH + 1))
+fi
+
+NEW_VERSION="$MAJOR.$MINOR.$PATCH"
+
+# Update peek.py
+sed -i "s/VERSION = \"$CURRENT\"/VERSION = \"$NEW_VERSION\"/" "$PEEK_FILE"
+
+# Stage the updated file
+git add "$PEEK_FILE"
+
+echo "peek: version $CURRENT → $NEW_VERSION"

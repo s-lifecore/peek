@@ -11,6 +11,9 @@ python3 -m venv "$VENV_DIR"
 echo "peek: Installing dependencies..."
 "$VENV_DIR/bin/pip" install -r "$SCRIPT_DIR/requirements.txt" --quiet
 
+echo "peek: Configuring git hooks..."
+git -C "$SCRIPT_DIR" config core.hooksPath .githooks
+
 echo "peek: Installing CLI command..."
 mkdir -p "$INSTALL_DIR"
 
