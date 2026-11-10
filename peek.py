@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""peek - GUI file viewer for WSL terminals"""
+"""peek - GUI file viewer for WSL / Linux / macOS terminals"""
 
 import sys
 import os
@@ -12,21 +12,26 @@ import socket
 from pathlib import Path
 
 SUPPORTED_EXT = {'.md', '.markdown', '.txt', '.pdf'}
-VERSION = "1.3.0"
+VERSION = "1.4.0"
 MAX_FILE_BYTES = 10 * 1024 * 1024  # 10 MB
 
-HELP_EN = """peek {version} - GUI file viewer for WSL terminals
+HELP_EN = """peek {version} - GUI file viewer for WSL / Linux / macOS terminals
 
 USAGE:
   peek [options] <file>
 
 OPTIONS:
-  -w, --windows         Open with Windows default browser, save to Windows (default)
-  -l, --linux           Open with Linux default browser, save to Linux ~/Downloads/
+  -w, --windows         Open with Windows default browser, save to Windows
+  -l, --linux           Open with Linux default browser, save to ~/Downloads/
+  -m, --mac             Open with macOS default browser, save to ~/Downloads/
   -e, --edit            Edit mode: detach server + open live editor in browser
+  --update              Pull latest version from git and reinstall deps
   --help-en             Show this help (English)
   --help-ja             Show help in Japanese
   --version             Show version
+
+  Platform is auto-detected if no flag is given:
+    macOS  → -m   |   WSL → -w   |   Linux → -l
 
 SUPPORTED FILE TYPES:
   .md / .markdown       Rendered Markdown with code highlighting
@@ -36,27 +41,32 @@ SUPPORTED FILE TYPES:
 EXAMPLES:
   peek README.md
   peek -l notes.txt
+  peek -m README.md        # macOS
   peek -e README.md
-  peek -e -l notes.txt
 
 HOW IT WORKS:
-  Starts a local web server and opens the browser for the specified platform.
+  Starts a local web server and opens the browser for the detected platform.
   Press Ctrl+C in the terminal to stop the server.
   With -e, server runs in background and terminal is freed (kill <PID> to stop).
 """.format(version=VERSION)
 
-HELP_JA = """peek {version} - WSL ターミナル用 GUI ファイルビューア
+HELP_JA = """peek {version} - WSL / Linux / macOS ターミナル用 GUI ファイルビューア
 
 使い方:
   peek [オプション] <ファイル>
 
 オプション:
-  -w, --windows         Windows のデフォルトブラウザで開く・Windows に保存（デフォルト）
-  -l, --linux           Linux のデフォルトブラウザで開く・Linux の ~/Downloads/ に保存
+  -w, --windows         Windows のデフォルトブラウザで開く・Windows に保存
+  -l, --linux           Linux のデフォルトブラウザで開く・~/Downloads/ に保存
+  -m, --mac             macOS のデフォルトブラウザで開く・~/Downloads/ に保存
   -e, --edit            編集モード: サーバーをバックグラウンドで起動 + ライブエディタを開く
+  --update              git から最新版を取得して依存関係を更新
   --help-en             英語のヘルプを表示
   --help-ja             このヘルプを表示（日本語）
   --version             バージョンを表示
+
+  フラグ未指定時は OS を自動検出:
+    macOS → -m   |   WSL → -w   |   Linux → -l
 
 対応ファイル形式:
   .md / .markdown        コードハイライト付きマークダウンレンダリング
@@ -66,11 +76,11 @@ HELP_JA = """peek {version} - WSL ターミナル用 GUI ファイルビュー�
 使用例:
   peek README.md
   peek -l notes.txt
+  peek -m README.md        # macOS
   peek -e README.md
-  peek -e -l notes.txt
 
 仕組み:
-  ローカルウェブサーバーを起動し、指定したプラットフォームのブラウザで開きます。
+  ローカルウェブサーバーを起動し、検出されたプラットフォームのブラウザで開きます。
   -e を指定するとサーバーがバックグラウンドで動作し、端末が解放されます（kill <PID> で停止）。
 """.format(version=VERSION)
 
@@ -86,11 +96,25 @@ def find_free_port(start=8899):
     raise RuntimeError("No free port available in range 8899-8999")
 
 
+def _detect_default_platform():
+    if sys.platform == "darwin":
+        return "mac"
+    try:
+        with open("/proc/version") as f:
+            if "microsoft" in f.read().lower():
+                return "windows"
+    except OSError:
+        pass
+    return "linux"
+
+
 def open_browser(port, token, platform="windows"):
     time.sleep(0.8)
     url = f"http://localhost:{port}/?token={token}"
 
-    if platform == "linux":
+    if platform == "mac":
+        cmds = [["open", url]]
+    elif platform == "linux":
         cmds = [
             ["xdg-open", url],
             ["firefox", url],
@@ -112,7 +136,11 @@ def open_browser(port, token, platform="windows"):
             continue
 
     # All commands failed — print platform-specific guidance
-    if platform == "linux":
+    if platform == "mac":
+        print("peek: macOS のブラウザを開けませんでした。")
+        print("      `open` コマンドが使えるか確認してください。")
+        print(f"      または手動でアクセス: {url}")
+    elif platform == "linux":
         print("peek: Linux のブラウザが見つかりませんでした。")
         print("      以下のいずれかでインストールしてください:")
         print("        sudo apt install firefox")
@@ -130,7 +158,7 @@ def _sanitize_error(msg):
     return msg.replace(home, "~") if home != "~" else msg
 
 
-def _linux_save(src_path, filename=None):
+def _local_save(src_path, filename=None):
     """Copy src_path to ~/Downloads/, return destination path string."""
     downloads = Path.home() / "Downloads"
     downloads.mkdir(exist_ok=True)
@@ -322,8 +350,8 @@ def create_app(target_file, access_token, platform="windows", edit_mode=False):
         """Download the source file (windows: browser DL / linux: ~/Downloads/)."""
         path = Path(target_file)
         _check_size(path)
-        if platform == "linux":
-            dest = _linux_save(str(path))
+        if platform in ("linux", "mac"):
+            dest = _local_save(str(path))
             return jsonify({"success": True, "path": dest})
         return send_file(str(path), as_attachment=True, download_name=path.name)
 
@@ -347,10 +375,9 @@ def create_app(target_file, access_token, platform="windows", edit_mode=False):
             except Exception as e2:
                 return jsonify({"success": False, "error": _sanitize_error(str(e2))}), 500
 
-        if platform == "linux":
-            # PDF is already in the Linux filesystem next to the .md file
+        if platform in ("linux", "mac"):
             return jsonify({"success": True, "filename": output_pdf.name,
-                            "path": str(output_pdf), "platform": "linux"})
+                            "path": str(output_pdf), "platform": platform})
         return jsonify({"success": True, "filename": output_pdf.name, "platform": "windows"})
 
     @app.route("/download-pdf")
@@ -363,6 +390,24 @@ def create_app(target_file, access_token, platform="windows", edit_mode=False):
         return send_file(str(output_pdf), as_attachment=True, download_name=output_pdf.name)
 
     return app
+
+
+def _do_update():
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    venv_pip = str(Path.home() / ".local" / "share" / "peek-venv" / "bin" / "pip")
+    req_file = os.path.join(script_dir, "requirements.txt")
+
+    print("peek: Pulling latest changes...")
+    result = subprocess.run(["git", "-C", script_dir, "pull"])
+    if result.returncode != 0:
+        print("peek: git pull failed. Check your network or remote settings.")
+        sys.exit(1)
+
+    if os.path.isfile(venv_pip) and os.path.isfile(req_file):
+        print("peek: Updating dependencies...")
+        subprocess.run([venv_pip, "install", "-r", req_file, "--quiet"])
+
+    print("peek: Done! Run 'peek --version' to verify.")
 
 
 def main():
@@ -384,8 +429,12 @@ def main():
         print(f"peek {VERSION}")
         sys.exit(0)
 
+    if args[0] in ("--update", "update"):
+        _do_update()
+        sys.exit(0)
+
     # Parse flags
-    platform = "windows"
+    platform = _detect_default_platform()
     edit_mode = False
     clean_args = []
     for arg in args:
@@ -393,6 +442,8 @@ def main():
             platform = "linux"
         elif arg in ("-w", "--windows"):
             platform = "windows"
+        elif arg in ("-m", "--mac"):
+            platform = "mac"
         elif arg in ("-e", "--edit"):
             edit_mode = True
         else:
@@ -421,7 +472,7 @@ def main():
     access_token = secrets.token_urlsafe(32)
     app = create_app(target_file, access_token, platform, edit_mode)
 
-    mode_label = "Linux ~/Downloads/" if platform == "linux" else "Windows"
+    mode_label = {"linux": "Linux ~/Downloads/", "mac": "macOS ~/Downloads/"}.get(platform, "Windows")
     edit_label = " [edit]" if edit_mode else ""
     print(f"peek: {Path(target_file).name}  [{mode_label}]{edit_label}")
     print(f"      http://localhost:{port}/?token=***")

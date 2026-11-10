@@ -445,7 +445,7 @@
 
     <div class="header-right">
       <span class="save-mode-badge">
-        {%- if platform == 'linux' %}Linux{%- else %}Windows{%- endif %}
+        {%- if platform == 'mac' %}Mac{%- elif platform == 'linux' %}Linux{%- else %}Windows{%- endif %}
       </span>
 
       {% if edit_mode %}
@@ -507,6 +507,74 @@
 
   {% endif %}
 
+  <script>
+    const PLATFORM = "{{ platform }}";
+
+    function showToast(msg, type) {
+      const t = document.getElementById('toast');
+      t.textContent = msg;
+      t.className = `toast ${type} show`;
+      setTimeout(() => { t.classList.remove('show'); }, 3500);
+    }
+
+    function resetBtn(btn, label, originalText) {
+      btn.classList.remove('loading', 'success', 'error');
+      label.textContent = originalText;
+      btn.disabled = false;
+    }
+
+    async function triggerBrowserDownload(url, filename) {
+      const res = await fetch(url);
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const blob = await res.blob();
+      const objectUrl = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = objectUrl;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      setTimeout(() => URL.revokeObjectURL(objectUrl), 1000);
+    }
+
+    async function downloadSource() {
+      const btn = document.getElementById('dl-btn');
+      const label = btn.querySelector('.btn-label');
+      btn.disabled = true;
+      btn.classList.add('loading');
+      label.textContent = '保存中...';
+
+      try {
+        if (PLATFORM !== 'windows') {
+          const res = await fetch('/download');
+          const data = await res.json();
+          btn.classList.remove('loading');
+          if (data.success) {
+            btn.classList.add('success');
+            label.textContent = '完了';
+            showToast(`保存: ${data.path}`, 'success');
+            setTimeout(() => resetBtn(btn, label, '保存'), 3000);
+          } else {
+            btn.classList.add('error');
+            label.textContent = 'エラー';
+            setTimeout(() => resetBtn(btn, label, '保存'), 3000);
+          }
+        } else {
+          await triggerBrowserDownload('/download', '{{ filename }}');
+          btn.classList.remove('loading');
+          btn.classList.add('success');
+          label.textContent = '完了';
+          setTimeout(() => resetBtn(btn, label, '保存'), 2000);
+        }
+      } catch (e) {
+        btn.classList.remove('loading');
+        btn.classList.add('error');
+        label.textContent = 'エラー';
+        setTimeout(() => resetBtn(btn, label, '保存'), 3000);
+      }
+    }
+  </script>
+
   {% if file_type == 'markdown' %}
   <script>
     // Syntax highlighting
@@ -542,74 +610,6 @@
       h.appendChild(a);
     });
 
-    const PLATFORM = "{{ platform }}";
-
-    function showToast(msg, type) {
-      const t = document.getElementById('toast');
-      t.textContent = msg;
-      t.className = `toast ${type} show`;
-      setTimeout(() => { t.classList.remove('show'); }, 3500);
-    }
-
-    function resetBtn(btn, label, originalText) {
-      btn.classList.remove('loading', 'success', 'error');
-      label.textContent = originalText;
-      btn.disabled = false;
-    }
-
-    // Fetch the URL as a Blob and trigger a native browser download dialog.
-    // More reliable than window.location.href in WSL+Windows browser environments.
-    async function triggerBrowserDownload(url, filename) {
-      const res = await fetch(url);
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const blob = await res.blob();
-      const objectUrl = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = objectUrl;
-      a.download = filename;
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-      setTimeout(() => URL.revokeObjectURL(objectUrl), 1000);
-    }
-
-    async function downloadSource() {
-      const btn = document.getElementById('dl-btn');
-      const label = btn.querySelector('.btn-label');
-      btn.disabled = true;
-      btn.classList.add('loading');
-      label.textContent = '保存中...';
-
-      try {
-        if (PLATFORM === 'linux') {
-          const res = await fetch('/download');
-          const data = await res.json();
-          btn.classList.remove('loading');
-          if (data.success) {
-            btn.classList.add('success');
-            label.textContent = '完了';
-            showToast(`保存: ${data.path}`, 'success');
-            setTimeout(() => resetBtn(btn, label, '保存'), 3000);
-          } else {
-            btn.classList.add('error');
-            label.textContent = 'エラー';
-            setTimeout(() => resetBtn(btn, label, '保存'), 3000);
-          }
-        } else {
-          await triggerBrowserDownload('/download', '{{ filename }}');
-          btn.classList.remove('loading');
-          btn.classList.add('success');
-          label.textContent = '完了';
-          setTimeout(() => resetBtn(btn, label, '保存'), 2000);
-        }
-      } catch (e) {
-        btn.classList.remove('loading');
-        btn.classList.add('error');
-        label.textContent = 'エラー';
-        setTimeout(() => resetBtn(btn, label, '保存'), 3000);
-      }
-    }
-
     async function generatePdf() {
       const btn = document.getElementById('pdf-gen-btn');
       const label = btn.querySelector('.btn-label');
@@ -625,7 +625,7 @@
         if (data.success) {
           btn.classList.add('success');
           label.textContent = '完了';
-          if (data.platform === 'linux') {
+          if (data.platform !== 'windows') {
             showToast(`保存: ${data.path}`, 'success');
             setTimeout(() => resetBtn(btn, label, 'PDF 生成'), 3000);
           } else {
