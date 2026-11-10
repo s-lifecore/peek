@@ -13,7 +13,7 @@ import difflib
 from pathlib import Path
 
 SUPPORTED_EXT = {'.md', '.markdown', '.txt', '.pdf'}
-VERSION = "1.8.0"
+VERSION = "1.9.0"
 MAX_FILE_BYTES = 10 * 1024 * 1024  # 10 MB
 
 HELP_EN = """peek {version} - GUI file viewer for WSL / Linux / macOS terminals
@@ -164,13 +164,59 @@ def _sanitize_error(msg):
     return msg.replace(home, "~") if home != "~" else msg
 
 
-def _local_save(src_path, filename=None):
-    """Copy src_path to ~/Downloads/, return destination path string."""
-    downloads = Path.home() / "Downloads"
-    downloads.mkdir(exist_ok=True)
-    dest = downloads / (filename or Path(src_path).name)
+def _local_save(src_path, filename=None, downloads_dir=None):
+    """Copy src_path to downloads_dir (default ~/Downloads/), return destination path string."""
+    if downloads_dir is None:
+        downloads_dir = Path.home() / "Downloads"
+    downloads_dir = Path(downloads_dir)
+    downloads_dir.mkdir(parents=True, exist_ok=True)
+    dest = downloads_dir / (filename or Path(src_path).name)
     shutil.copy2(str(src_path), str(dest))
     return str(dest)
+
+
+def _windows_downloads_path():
+    """Return Windows Downloads folder as a WSL-accessible Path, or None."""
+    win_profile = None
+    for cmd, enc in (
+        (['wslvar', 'USERPROFILE'], 'utf-8'),
+        (['cmd.exe', '/c', 'echo', '%USERPROFILE%'], 'cp932'),
+    ):
+        try:
+            r = subprocess.run(cmd, capture_output=True, timeout=5)
+            if r.returncode == 0 and r.stdout.strip():
+                win_profile = r.stdout.decode(enc, errors='replace').strip().replace('\r', '').replace('\n', '')
+                break
+        except (FileNotFoundError, subprocess.TimeoutExpired):
+            continue
+    if not win_profile or ':\\' not in win_profile:
+        return None
+    drive, rest = win_profile.split(':\\', 1)
+    p = Path(f"/mnt/{drive.lower()}/{rest.replace(chr(92), '/')}/Downloads")
+    return p if p.exists() else None
+
+
+def _normalize_path(path_str):
+    """Convert Windows-style path (C:\\...) to WSL path (/mnt/c/...), expand ~."""
+    p = path_str.strip()
+    if len(p) >= 3 and p[1] == ':' and p[2] in ('\\', '/'):
+        drive = p[0].lower()
+        rest = p[3:].replace('\\', '/')
+        return f"/mnt/{drive}/{rest}"
+    return p.replace('\\', '/')
+
+
+def _default_save_display(platform, win_downloads, filename):
+    """Return the default save path as a display string for the Save As dialog."""
+    if platform == "windows" and win_downloads:
+        # Convert WSL /mnt/c/... back to C:\... for display
+        parts = str(win_downloads).lstrip('/').split('/')
+        # ['mnt', 'c', 'Users', 'straw', 'Downloads']
+        drive = parts[1].upper()
+        rest = '\\'.join(parts[2:])
+        return f"{drive}:\\{rest}\\{filename}"
+    downloads = Path.home() / "Downloads" / filename
+    return str(downloads)
 
 
 def _make_restricted_fetcher(allowed_dir):
@@ -265,6 +311,9 @@ def create_app(target_file, access_token, platform="windows", edit_mode=False):
         print("      Run: pip3 install flask markdown2")
         sys.exit(1)
 
+    _win_downloads = _windows_downloads_path() if platform == "windows" else None
+    _save_default = _default_save_display(platform, _win_downloads, Path(target_file).name)
+
     template_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "templates")
     app = Flask(__name__, template_folder=template_dir)
     app.config["MAX_CONTENT_LENGTH"] = MAX_FILE_BYTES
@@ -315,7 +364,8 @@ def create_app(target_file, access_token, platform="windows", edit_mode=False):
         ext = path.suffix.lower()
         _check_size(path)
 
-        common = dict(filename=path.name, platform=platform, edit_mode=edit_mode)
+        common = dict(filename=path.name, platform=platform, edit_mode=edit_mode,
+                      default_save_path=_save_default)
 
         if ext == ".pdf":
             return render_template("view.html", file_type="pdf", content="", **common)
@@ -353,13 +403,16 @@ def create_app(target_file, access_token, platform="windows", edit_mode=False):
 
     @app.route("/download")
     def download():
-        """Download the source file (windows: browser DL / linux: ~/Downloads/)."""
+        """Save source file to platform Downloads folder and return path."""
         path = Path(target_file)
         _check_size(path)
-        if platform in ("linux", "mac"):
-            dest = _local_save(str(path))
-            return jsonify({"success": True, "path": dest})
-        return send_file(str(path), as_attachment=True, download_name=path.name)
+        if platform == "windows":
+            if _win_downloads:
+                dest = _local_save(str(path), downloads_dir=_win_downloads)
+                return jsonify({"success": True, "path": dest})
+            return send_file(str(path), as_attachment=True, download_name=path.name)
+        dest = _local_save(str(path))
+        return jsonify({"success": True, "path": dest})
 
     @app.route("/generate-pdf", methods=["POST"])
     def generate_pdf():
@@ -381,14 +434,40 @@ def create_app(target_file, access_token, platform="windows", edit_mode=False):
             except Exception as e2:
                 return jsonify({"success": False, "error": _sanitize_error(str(e2))}), 500
 
-        if platform in ("linux", "mac"):
-            return jsonify({"success": True, "filename": output_pdf.name,
-                            "path": str(output_pdf), "platform": platform})
-        return jsonify({"success": True, "filename": output_pdf.name, "platform": "windows"})
+        if platform == "windows":
+            if _win_downloads:
+                dest = _local_save(str(output_pdf), downloads_dir=_win_downloads)
+                return jsonify({"success": True, "filename": output_pdf.name,
+                                "path": dest, "platform": platform})
+            return jsonify({"success": True, "filename": output_pdf.name, "platform": "windows"})
+        dest = _local_save(str(output_pdf))
+        return jsonify({"success": True, "filename": output_pdf.name,
+                        "path": dest, "platform": platform})
+
+    @app.route("/save-as", methods=["POST"])
+    def save_as():
+        """Save file to a user-specified path (Save As dialog)."""
+        data = request.get_json(silent=True) or {}
+        dest_str = data.get("path", "").strip()
+        content = data.get("content")  # present in edit mode, absent in view mode
+        if not dest_str:
+            return jsonify({"success": False, "error": "パスが空です"}), 400
+        dest = Path(_normalize_path(dest_str)).expanduser()
+        if not dest.suffix:
+            return jsonify({"success": False, "error": "ファイル名を指定してください"}), 400
+        try:
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            if content is not None:
+                dest.write_text(content, encoding="utf-8")
+            else:
+                shutil.copy2(target_file, str(dest))
+            return jsonify({"success": True, "path": str(dest)})
+        except Exception as e:
+            return jsonify({"success": False, "error": _sanitize_error(str(e))}), 500
 
     @app.route("/download-pdf")
     def download_pdf():
-        """Send generated PDF to browser (windows mode only)."""
+        """Send generated PDF to browser (fallback when Windows Downloads path unavailable)."""
         path = Path(target_file)
         output_pdf = path.with_suffix(".pdf")
         if not output_pdf.exists():

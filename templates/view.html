@@ -421,6 +421,46 @@
     .save-btn { border-color: var(--mauve); color: var(--mauve); }
     .save-btn:hover:not(:disabled) { background: var(--mauve); color: var(--surface); }
     .save-btn.saved { border-color: var(--green); color: var(--green); }
+
+    /* ───── Save-As modal ───── */
+    .modal-overlay {
+      position: fixed; inset: 0;
+      background: rgba(0,0,0,0.6);
+      display: flex; align-items: center; justify-content: center;
+      z-index: 200;
+    }
+    .modal-overlay.hidden { display: none; }
+    .modal-box {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 24px 28px;
+      width: min(480px, 90vw);
+      display: flex; flex-direction: column; gap: 14px;
+    }
+    .modal-title { font-size: 14px; font-weight: 700; color: var(--text); }
+    .modal-label { font-size: 12px; color: var(--subtext); }
+    .modal-input {
+      width: 100%; padding: 8px 10px;
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      color: var(--text);
+      font-family: "Consolas", "JetBrains Mono", monospace;
+      font-size: 12.5px;
+      outline: none;
+    }
+    .modal-input:focus { border-color: var(--blue); }
+    .modal-actions { display: flex; gap: 8px; justify-content: flex-end; }
+    .modal-btn {
+      padding: 5px 18px; border-radius: 6px; border: 1px solid;
+      background: transparent; font-size: 12px; font-family: inherit;
+      font-weight: 600; cursor: pointer;
+    }
+    .modal-btn-primary { border-color: var(--blue); color: var(--blue); }
+    .modal-btn-primary:hover { background: var(--blue); color: var(--surface); }
+    .modal-btn-cancel  { border-color: var(--muted); color: var(--muted); }
+    .modal-btn-cancel:hover  { background: var(--overlay); }
   </style>
 </head>
 <body>
@@ -451,12 +491,18 @@
       {% if edit_mode %}
       <button class="header-btn save-btn" id="save-btn" onclick="saveFile()">
         <span class="spinner"></span>
-        <span class="btn-label">保存</span>
+        <span class="btn-label">上書き保存</span>
+      </button>
+      <button class="header-btn dl-btn" id="save-as-btn" onclick="openSaveAs()">
+        名前を付けて保存
       </button>
       {% else %}
       <button class="header-btn dl-btn" id="dl-btn" onclick="downloadSource()">
         <span class="spinner"></span>
         <span class="btn-label">保存</span>
+      </button>
+      <button class="header-btn dl-btn" id="save-as-btn" onclick="openSaveAs()">
+        保存先を指定
       </button>
       {% endif %}
 
@@ -470,6 +516,19 @@
   </header>
 
   <div class="toast" id="toast"></div>
+
+  <div class="modal-overlay hidden" id="save-as-modal">
+    <div class="modal-box">
+      <div class="modal-title">保存先を指定</div>
+      <div class="modal-label">保存先のパスを入力してください</div>
+      <input type="text" class="modal-input" id="save-as-path"
+             value="{{ default_save_path }}" spellcheck="false" />
+      <div class="modal-actions">
+        <button class="modal-btn modal-btn-cancel" onclick="closeSaveAs()">キャンセル</button>
+        <button class="modal-btn modal-btn-primary" id="save-as-confirm-btn" onclick="confirmSaveAs()">保存</button>
+      </div>
+    </div>
+  </div>
 
   {% if edit_mode and file_type != 'pdf' %}
 
@@ -537,6 +596,59 @@
       setTimeout(() => URL.revokeObjectURL(objectUrl), 1000);
     }
 
+    function openSaveAs() {
+      document.getElementById('save-as-modal').classList.remove('hidden');
+      const input = document.getElementById('save-as-path');
+      input.focus();
+      input.select();
+    }
+
+    function closeSaveAs() {
+      document.getElementById('save-as-modal').classList.add('hidden');
+    }
+
+    document.getElementById('save-as-modal').addEventListener('click', e => {
+      if (e.target === document.getElementById('save-as-modal')) closeSaveAs();
+    });
+
+    document.getElementById('save-as-path').addEventListener('keydown', e => {
+      if (e.key === 'Enter')  confirmSaveAs();
+      if (e.key === 'Escape') closeSaveAs();
+    });
+
+    async function confirmSaveAs() {
+      const path = document.getElementById('save-as-path').value.trim();
+      if (!path) return;
+      const btn = document.getElementById('save-as-confirm-btn');
+      btn.disabled = true;
+      btn.textContent = '保存中...';
+
+      // In edit mode, include current editor content
+      const content = (typeof editor !== 'undefined') ? editor.value : undefined;
+      const body = content !== undefined ? { path, content } : { path };
+
+      try {
+        const res = await fetch('/save-as', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(body),
+        });
+        const data = await res.json();
+        closeSaveAs();
+        if (data.success) {
+          showToast(`保存: ${data.path}`, 'success');
+        } else {
+          showToast(`エラー: ${data.error || '保存に失敗しました'}`, 'error');
+        }
+      } catch (e) {
+        closeSaveAs();
+        showToast('保存に失敗しました', 'error');
+      } finally {
+        btn.disabled = false;
+        btn.textContent = '保存';
+      }
+    }
+
     async function downloadSource() {
       const btn = document.getElementById('dl-btn');
       const label = btn.querySelector('.btn-label');
@@ -545,10 +657,11 @@
       label.textContent = '保存中...';
 
       try {
-        if (PLATFORM !== 'windows') {
-          const res = await fetch('/download');
+        const res = await fetch('/download');
+        const ct = res.headers.get('Content-Type') || '';
+        btn.classList.remove('loading');
+        if (ct.includes('application/json')) {
           const data = await res.json();
-          btn.classList.remove('loading');
           if (data.success) {
             btn.classList.add('success');
             label.textContent = '完了';
@@ -560,8 +673,16 @@
             setTimeout(() => resetBtn(btn, label, '保存'), 3000);
           }
         } else {
-          await triggerBrowserDownload('/download', '{{ filename }}');
-          btn.classList.remove('loading');
+          // Fallback: browser download (Windows without accessible Downloads path)
+          const blob = await res.blob();
+          const objectUrl = URL.createObjectURL(blob);
+          const a = document.createElement('a');
+          a.href = objectUrl;
+          a.download = '{{ filename }}';
+          document.body.appendChild(a);
+          a.click();
+          document.body.removeChild(a);
+          setTimeout(() => URL.revokeObjectURL(objectUrl), 1000);
           btn.classList.add('success');
           label.textContent = '完了';
           setTimeout(() => resetBtn(btn, label, '保存'), 2000);
@@ -625,7 +746,7 @@
         if (data.success) {
           btn.classList.add('success');
           label.textContent = '完了';
-          if (data.platform !== 'windows') {
+          if (data.path) {
             showToast(`保存: ${data.path}`, 'success');
             setTimeout(() => resetBtn(btn, label, 'PDF 生成'), 3000);
           } else {
