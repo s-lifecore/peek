@@ -12,7 +12,7 @@ import socket
 from pathlib import Path
 
 SUPPORTED_EXT = {'.md', '.markdown', '.txt', '.pdf'}
-VERSION = "1.5.1"
+VERSION = "1.6.0"
 MAX_FILE_BYTES = 10 * 1024 * 1024  # 10 MB
 
 HELP_EN = """peek {version} - GUI file viewer for WSL / Linux / macOS terminals
@@ -21,34 +21,33 @@ USAGE:
   peek [options] <file>
 
 OPTIONS:
-  -w, --windows         Open with Windows default browser, save to Windows
-  -l, --linux           Open with Linux default browser, save to ~/Downloads/
-  -m, --mac             Open with macOS default browser, save to ~/Downloads/
+  -t, --tui             Open in TUI mode directly in the terminal
+  -b, --browser         Open in browser with auto-detected platform (default)
+  -w, --windows         Browser: Windows default browser, save to Windows
+  -l, --linux           Browser: Linux default browser, save to ~/Downloads/
+  -m, --mac             Browser: macOS default browser, save to ~/Downloads/
   -e, --edit            Edit mode: detach server + open live editor in browser
   --update              Pull latest version from git and reinstall deps
   --help-en             Show this help (English)
   --help-ja             Show help in Japanese
   --version             Show version
 
-  No flag: opens in TUI mode directly in the terminal (default).
-  With -w/-l/-m: opens in browser instead.
-  With -e: browser-based live editor (platform auto-detected if no flag).
-
 SUPPORTED FILE TYPES:
   .md / .markdown       Rendered Markdown with syntax highlighting
   .txt                  Plain text with line numbers
-  .pdf                  TUI: text extraction via pdftotext / browser: native viewer
+  .pdf                  Browser: native viewer / TUI: text via pdftotext
 
 EXAMPLES:
-  peek README.md             # TUI viewer (default)
+  peek README.md             # browser (default, platform auto-detected)
+  peek -t README.md          # TUI viewer
   peek -w README.md          # Windows browser
   peek -l notes.txt          # Linux browser
   peek -m README.md          # macOS browser
   peek -e README.md          # browser live editor
 
 HOW IT WORKS:
-  TUI mode: renders the file directly in the terminal using textual.
-  Browser mode (-w/-l/-m): starts a local Flask server and opens the browser.
+  Browser mode (default): starts a local Flask server and opens the browser.
+  TUI mode (-t): renders the file directly in the terminal using textual.
   With -e, server runs in background and terminal is freed (kill <PID> to stop).
 """.format(version=VERSION)
 
@@ -58,34 +57,33 @@ HELP_JA = """peek {version} - WSL / Linux / macOS ターミナル用 GUI ファ�
   peek [オプション] <ファイル>
 
 オプション:
-  -w, --windows         Windows のデフォルトブラウザで開く・Windows に保存
-  -l, --linux           Linux のデフォルトブラウザで開く・~/Downloads/ に保存
-  -m, --mac             macOS のデフォルトブラウザで開く・~/Downloads/ に保存
-  -e, --edit            編集モード: サーバーをバックグラウンドで起動 + ライブエディタを開く
+  -t, --tui             ターミナル内 TUI モードで表示
+  -b, --browser         ブラウザで開く（デフォルト・OS 自動検出）
+  -w, --windows         ブラウザ: Windows のデフォルトブラウザ・Windows に保存
+  -l, --linux           ブラウザ: Linux のデフォルトブラウザ・~/Downloads/ に保存
+  -m, --mac             ブラウザ: macOS のデフォルトブラウザ・~/Downloads/ に保存
+  -e, --edit            編集モード: バックグラウンドサーバー + ブラウザライブエディタ
   --update              git から最新版を取得して依存関係を更新
   --help-en             英語のヘルプを表示
   --help-ja             このヘルプを表示（日本語）
   --version             バージョンを表示
 
-  フラグなし: ターミナル内 TUI モードで表示（デフォルト）。
-  -w/-l/-m: ブラウザで開く。
-  -e: ブラウザライブエディタ（フラグなしの場合は OS を自動検出）。
-
 対応ファイル形式:
   .md / .markdown        シンタックスハイライト付き Markdown レンダリング
   .txt                   行番号付きプレーンテキスト表示
-  .pdf                   TUI: pdftotext でテキスト抽出 / ブラウザ: ネイティブビューア
+  .pdf                   ブラウザ: ネイティブビューア / TUI: pdftotext でテキスト抽出
 
 使用例:
-  peek README.md             # TUI ビューア（デフォルト）
+  peek README.md             # ブラウザで開く（デフォルト・OS 自動検出）
+  peek -t README.md          # TUI ビューア
   peek -w README.md          # Windows ブラウザ
   peek -l notes.txt          # Linux ブラウザ
   peek -m README.md          # macOS ブラウザ
   peek -e README.md          # ブラウザライブエディタ
 
 仕組み:
-  TUI モード: textual を使ってターミナル内に直接レンダリング。
-  ブラウザモード (-w/-l/-m): Flask ローカルサーバーを起動しブラウザで開く。
+  ブラウザモード（デフォルト）: Flask ローカルサーバーを起動しブラウザで開く。
+  TUI モード (-t): textual を使ってターミナル内に直接レンダリング。
   -e: サーバーがバックグラウンドで動作し、端末が解放されます（kill <PID> で停止）。
 """.format(version=VERSION)
 
@@ -525,18 +523,27 @@ def main():
         sys.exit(0)
 
     # Parse flags
-    platform = None   # None = TUI mode; set by -w/-l/-m for browser mode
+    platform = _detect_default_platform()
+    tui_mode = False
     edit_mode = False
     clean_args = []
     for arg in args:
-        if arg in ("-l", "--linux"):
-            platform = "linux"
+        if arg in ("-t", "--tui"):
+            tui_mode = True
+        elif arg in ("-b", "--browser"):
+            tui_mode = False
         elif arg in ("-w", "--windows"):
             platform = "windows"
+            tui_mode = False
+        elif arg in ("-l", "--linux"):
+            platform = "linux"
+            tui_mode = False
         elif arg in ("-m", "--mac"):
             platform = "mac"
+            tui_mode = False
         elif arg in ("-e", "--edit"):
             edit_mode = True
+            tui_mode = False
         else:
             clean_args.append(arg)
     args = clean_args
@@ -559,14 +566,9 @@ def main():
         print(f"      Supported: {', '.join(sorted(SUPPORTED_EXT))}")
         sys.exit(1)
 
-    # TUI mode: no browser flag and not edit mode
-    if platform is None and not edit_mode:
+    if tui_mode:
         _run_tui(target_file)
         sys.exit(0)
-
-    # Browser mode: auto-detect platform if only -e was given
-    if platform is None:
-        platform = _detect_default_platform()
 
     port = find_free_port()
     access_token = secrets.token_urlsafe(32)
