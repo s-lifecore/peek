@@ -4,6 +4,7 @@
 import sys
 import os
 import re
+import json
 import shutil
 import secrets
 import subprocess
@@ -14,8 +15,43 @@ import difflib
 from pathlib import Path
 
 SUPPORTED_EXT = {'.md', '.markdown', '.txt', '.pdf'}
-VERSION = "1.12.0"
+VERSION = "1.12.1"
 MAX_FILE_BYTES = 10 * 1024 * 1024  # 10 MB
+
+CONFIG_FILE = Path.home() / ".config" / "peek" / "settings.json"
+
+DEFAULT_SETTINGS = {
+    "theme": "catppuccin-mocha",
+    "custom_colors": {
+        "bg": "#1e1e2e", "surface": "#181825", "overlay": "#313244",
+        "text": "#cdd6f4", "muted": "#6c7086", "accent": "#89b4fa",
+    },
+    "quit_key": "ctrl+q",
+    "save_key": "ctrl+s",
+}
+
+THEMES = {
+    "catppuccin-mocha": {
+        "bg": "#1e1e2e", "surface": "#181825", "overlay": "#313244",
+        "text": "#cdd6f4", "muted": "#6c7086", "accent": "#89b4fa",
+    },
+    "catppuccin-latte": {
+        "bg": "#eff1f5", "surface": "#e6e9ef", "overlay": "#ccd0da",
+        "text": "#4c4f69", "muted": "#9ca0b0", "accent": "#1e66f5",
+    },
+    "nord": {
+        "bg": "#2e3440", "surface": "#3b4252", "overlay": "#434c5e",
+        "text": "#eceff4", "muted": "#4c566a", "accent": "#88c0d0",
+    },
+    "gruvbox-dark": {
+        "bg": "#282828", "surface": "#3c3836", "overlay": "#504945",
+        "text": "#ebdbb2", "muted": "#665c54", "accent": "#83a598",
+    },
+    "tokyo-night": {
+        "bg": "#1a1b26", "surface": "#16161e", "overlay": "#2f3549",
+        "text": "#c0caf5", "muted": "#565f89", "accent": "#7aa2f7",
+    },
+}
 
 HELP_EN = """peek {version} - GUI file viewer for WSL / Linux / macOS terminals
 
@@ -29,6 +65,7 @@ OPTIONS:
   -l, --linux           Browser: Linux default browser, save to ~/Downloads/
   -m, --mac             Browser: macOS default browser, save to ~/Downloads/
   -e, --edit            Edit mode: browser live editor (detached server) or TUI editor with -t
+  -s, --settings        Open TUI settings (theme, colors, keybindings) — standalone flag
   --update              Pull latest version from git and reinstall deps
   --help-en             Show this help (English)
   --help-ja             Show help in Japanese
@@ -66,6 +103,7 @@ HELP_JA = """peek {version} - WSL / Linux / macOS ターミナル用 GUI ファ�
   -l, --linux           ブラウザ: Linux のデフォルトブラウザ・~/Downloads/ に保存
   -m, --mac             ブラウザ: macOS のデフォルトブラウザ・~/Downloads/ に保存
   -e, --edit            編集モード: ブラウザライブエディタ（バックグラウンド）/ -t と組み合わせて TUI エディタ
+  -s, --settings        TUI 設定画面を開く（テーマ・カラー・キーバインド）— 単独フラグ
   --update              git から最新版を取得して依存関係を更新
   --help-en             英語のヘルプを表示
   --help-ja             このヘルプを表示（日本語）
@@ -565,7 +603,25 @@ def _run_tui(target_file, edit_mode=False):
         except (FileNotFoundError, subprocess.TimeoutExpired):
             pass
 
+    # Load user settings
+    settings = _load_settings()
+    colors   = _get_theme_colors(settings)
+    quit_key = settings.get("quit_key", "ctrl+q")
+    save_key = settings.get("save_key", "ctrl+s")
+    bg       = colors["bg"]
+    surface  = colors["surface"]
+    overlay  = colors.get("overlay", "#313244")
+    text_c   = colors["text"]
+    muted    = colors["muted"]
+    vim_mode = (quit_key == "vim" or save_key == "vim")
+
     TYPE_LABEL = {'markdown': 'MD', 'text': 'TXT', 'pdf': 'PDF'}
+
+    cmd_css = (
+        f"#cmd-bar {{ dock: bottom; height: 1; background: {surface}; "
+        f"color: {text_c}; padding: 0 1; display: none; }}\n"
+        f"#cmd-bar.active {{ display: block; }}\n"
+    ) if vim_mode else ""
 
     # ── TUI 編集モード (-t -e) ────────────────────────────────────────────────
     if edit_mode:
@@ -575,23 +631,29 @@ def _run_tui(target_file, edit_mode=False):
 
         from rich.markdown import Markdown as RichMarkdown
 
+        edit_bindings = []
+        if quit_key != "vim":
+            edit_bindings.append(Binding(quit_key, "quit", "終了", priority=True))
+        if save_key != "vim":
+            edit_bindings.append(Binding(save_key, "save", "保存", priority=True))
+
         class PeekEditApp(App):
             TITLE = path.name
             SUB_TITLE = f"{TYPE_LABEL.get(file_type, '')}  ✎"
-            CSS = """
-            Screen         { background: #1e1e2e; }
-            Header         { background: #181825; color: #cdd6f4; }
-            Footer         { background: #181825; color: #6c7086; }
-            Horizontal     { height: 1fr; }
-            #editor-pane   { width: 1fr; height: 1fr; border-right: solid #313244; }
-            #preview-pane  { width: 1fr; height: 1fr; background: #1e1e2e; }
-            TextArea       { height: 1fr; background: #1e1e2e; }
-            #preview-content { padding: 0 1; color: #cdd6f4; }
-            """
-            BINDINGS = [
-                Binding("ctrl+s", "save", "保存", priority=True),
-                Binding("ctrl+q", "quit", "終了", priority=True),
-            ]
+            CSS = (
+                f"Screen         {{ background: {bg}; }}\n"
+                f"Header         {{ background: {surface}; color: {text_c}; }}\n"
+                f"Footer         {{ background: {surface}; color: {muted}; }}\n"
+                f"Horizontal     {{ height: 1fr; }}\n"
+                f"#editor-pane   {{ width: 1fr; height: 1fr; border-right: solid {overlay}; }}\n"
+                f"#preview-pane  {{ width: 1fr; height: 1fr; background: {bg}; }}\n"
+                f"TextArea       {{ height: 1fr; background: {bg}; }}\n"
+                f"#preview-content {{ padding: 0 1; color: {text_c}; }}\n"
+                + cmd_css
+            )
+            BINDINGS = edit_bindings
+            _cmd_mode = False
+            _cmd_buf = ""
 
             def compose(self) -> ComposeResult:
                 yield Header(show_clock=False)
@@ -603,6 +665,8 @@ def _run_tui(target_file, edit_mode=False):
                             yield Static(RichMarkdown(content), id='preview-content')
                 else:
                     yield TextArea(content, id='editor')
+                if vim_mode:
+                    yield Static("", id="cmd-bar")
                 yield Footer()
 
             def on_text_area_changed(self, event: TextArea.Changed) -> None:
@@ -615,23 +679,80 @@ def _run_tui(target_file, edit_mode=False):
                 path.write_text(editor.text, encoding='utf-8')
                 self.notify("保存しました")
 
+            def on_key(self, event) -> None:
+                if not vim_mode:
+                    return
+                # Let TextArea consume its own keys
+                if isinstance(self.focused, TextArea):
+                    return
+                if not self._cmd_mode:
+                    if event.character == ":":
+                        self._cmd_mode = True
+                        self._cmd_buf = ":"
+                        self._update_cmd_bar()
+                        event.prevent_default()
+                else:
+                    event.prevent_default()
+                    if event.key == "escape":
+                        self._exit_cmd_mode()
+                    elif event.key == "enter":
+                        self._run_cmd(self._cmd_buf[1:])
+                    elif event.key == "backspace":
+                        if len(self._cmd_buf) > 1:
+                            self._cmd_buf = self._cmd_buf[:-1]
+                            self._update_cmd_bar()
+                        else:
+                            self._exit_cmd_mode()
+                    elif event.character:
+                        self._cmd_buf += event.character
+                        self._update_cmd_bar()
+
+            def _update_cmd_bar(self) -> None:
+                bar = self.query_one("#cmd-bar", Static)
+                bar.update(self._cmd_buf)
+                bar.add_class("active")
+
+            def _exit_cmd_mode(self) -> None:
+                self._cmd_mode = False
+                self._cmd_buf = ""
+                bar = self.query_one("#cmd-bar", Static)
+                bar.update("")
+                bar.remove_class("active")
+
+            def _run_cmd(self, cmd: str) -> None:
+                self._exit_cmd_mode()
+                if cmd == "w":
+                    self.action_save()
+                elif cmd in ("wq", "x"):
+                    self.action_save()
+                    self.exit()
+                elif cmd in ("q", "q!"):
+                    self.exit()
+
         PeekEditApp().run()
         return
 
     # ── TUI 閲覧モード (-t) ───────────────────────────────────────────────────
+    view_bindings = []
+    if quit_key != "vim":
+        view_bindings.append(Binding(quit_key, "quit", "終了"))
+
     class PeekApp(App):
         TITLE = path.name
         SUB_TITLE = TYPE_LABEL.get(file_type, '')
-        CSS = """
-        Screen        { background: #1e1e2e; }
-        Header        { background: #181825; color: #cdd6f4; }
-        Footer        { background: #181825; color: #6c7086; }
-        Markdown      { height: 1fr; padding: 1 2; background: #1e1e2e; }
-        VerticalScroll{ height: 1fr; background: #1e1e2e; }
-        #txt          { color: #cdd6f4; padding: 1 2; }
-        #pdf-info     { color: #f9e2af; padding: 2 4; }
-        """
-        BINDINGS = [Binding("q", "quit", "終了")]
+        CSS = (
+            f"Screen        {{ background: {bg}; }}\n"
+            f"Header        {{ background: {surface}; color: {text_c}; }}\n"
+            f"Footer        {{ background: {surface}; color: {muted}; }}\n"
+            f"Markdown      {{ height: 1fr; padding: 1 2; background: {bg}; }}\n"
+            f"VerticalScroll{{ height: 1fr; background: {bg}; }}\n"
+            f"#txt          {{ color: {text_c}; padding: 1 2; }}\n"
+            f"#pdf-info     {{ color: #f9e2af; padding: 2 4; }}\n"
+            + cmd_css
+        )
+        BINDINGS = view_bindings
+        _cmd_mode = False
+        _cmd_buf = ""
 
         def compose(self) -> ComposeResult:
             yield Header(show_clock=False)
@@ -658,9 +779,251 @@ def _run_tui(target_file, edit_mode=False):
                     "  sudo apt install poppler-utils",
                     id='pdf-info',
                 )
+            if vim_mode:
+                yield Static("", id="cmd-bar")
             yield Footer()
 
+        def on_key(self, event) -> None:
+            if not vim_mode:
+                return
+            if not self._cmd_mode:
+                if event.character == ":":
+                    self._cmd_mode = True
+                    self._cmd_buf = ":"
+                    self._update_cmd_bar()
+                    event.prevent_default()
+            else:
+                event.prevent_default()
+                if event.key == "escape":
+                    self._exit_cmd_mode()
+                elif event.key == "enter":
+                    self._run_cmd(self._cmd_buf[1:])
+                elif event.key == "backspace":
+                    if len(self._cmd_buf) > 1:
+                        self._cmd_buf = self._cmd_buf[:-1]
+                        self._update_cmd_bar()
+                    else:
+                        self._exit_cmd_mode()
+                elif event.character:
+                    self._cmd_buf += event.character
+                    self._update_cmd_bar()
+
+        def _update_cmd_bar(self) -> None:
+            bar = self.query_one("#cmd-bar", Static)
+            bar.update(self._cmd_buf)
+            bar.add_class("active")
+
+        def _exit_cmd_mode(self) -> None:
+            self._cmd_mode = False
+            self._cmd_buf = ""
+            bar = self.query_one("#cmd-bar", Static)
+            bar.update("")
+            bar.remove_class("active")
+
+        def _run_cmd(self, cmd: str) -> None:
+            self._exit_cmd_mode()
+            if cmd in ("q", "q!"):
+                self.exit()
+
     PeekApp().run()
+
+
+def _load_settings():
+    if CONFIG_FILE.exists():
+        try:
+            with open(CONFIG_FILE, encoding="utf-8") as f:
+                data = json.load(f)
+            result = dict(DEFAULT_SETTINGS)
+            result.update({k: v for k, v in data.items() if k in DEFAULT_SETTINGS})
+            if "custom_colors" in data:
+                result["custom_colors"] = {**DEFAULT_SETTINGS["custom_colors"], **data["custom_colors"]}
+            return result
+        except Exception:
+            pass
+    return dict(DEFAULT_SETTINGS)
+
+
+def _save_settings(data):
+    CONFIG_FILE.parent.mkdir(parents=True, exist_ok=True)
+    with open(CONFIG_FILE, "w", encoding="utf-8") as f:
+        json.dump(data, f, indent=2, ensure_ascii=False)
+
+
+def _get_theme_colors(settings):
+    theme = settings.get("theme", "catppuccin-mocha")
+    if theme == "custom":
+        base = dict(THEMES["catppuccin-mocha"])
+        base.update(settings.get("custom_colors", {}))
+        return base
+    return dict(THEMES.get(theme, THEMES["catppuccin-mocha"]))
+
+
+def _run_settings():
+    try:
+        from textual.app import App, ComposeResult
+        from textual.widgets import Header, Footer, Static, Label, Button, Input, Select
+        from textual.binding import Binding
+        from textual.containers import Horizontal, Vertical, VerticalScroll
+    except ImportError:
+        print("peek: textual が見つかりません。セットアップを再実行してください:")
+        print("      bash setup.sh")
+        sys.exit(1)
+
+    settings = _load_settings()
+
+    THEME_OPTIONS = [
+        ("Catppuccin Mocha (デフォルト)", "catppuccin-mocha"),
+        ("Catppuccin Latte",              "catppuccin-latte"),
+        ("Nord",                          "nord"),
+        ("Gruvbox Dark",                  "gruvbox-dark"),
+        ("Tokyo Night",                   "tokyo-night"),
+        ("カスタム",                      "custom"),
+    ]
+    QUIT_OPTIONS = [
+        ("Ctrl+Q",         "ctrl+q"),
+        ("q (ビューのみ)", "q"),
+        ("Escape",         "escape"),
+        ("Vim (:q / :q!)", "vim"),
+    ]
+    SAVE_OPTIONS = [
+        ("Ctrl+S",          "ctrl+s"),
+        ("F5",              "f5"),
+        ("Vim (:w / :wq)",  "vim"),
+    ]
+
+    cur_theme  = settings.get("theme", "catppuccin-mocha")
+    cur_colors = settings.get("custom_colors", DEFAULT_SETTINGS["custom_colors"])
+    cur_quit   = settings.get("quit_key", "ctrl+q")
+    cur_save   = settings.get("save_key", "ctrl+s")
+
+    COLOR_FIELDS = [
+        ("bg",      "背景:"),
+        ("surface", "サーフェス:"),
+        ("overlay", "オーバーレイ:"),
+        ("text",    "テキスト:"),
+        ("muted",   "ミュート:"),
+        ("accent",  "アクセント:"),
+    ]
+
+    class PeekSettingsApp(App):
+        TITLE = "peek 設定"
+        CSS = """
+Screen           { background: #1e1e2e; }
+Header           { background: #181825; color: #cdd6f4; }
+Footer           { background: #181825; color: #6c7086; }
+VerticalScroll   { height: 1fr; padding: 1 3; }
+.section         { color: #89b4fa; text-style: bold; padding: 1 0 0; }
+.hint            { color: #6c7086; padding: 0 0 0 2; }
+.row             { height: 3; align: left middle; }
+.lbl             { width: 18; color: #a6adc8; }
+Select           { width: 38; }
+Input            { width: 24; background: #313244; color: #cdd6f4; border: tall #313244; }
+Input:focus      { border: tall #89b4fa; }
+#custom-block    { display: none; padding: 0 2; }
+#custom-block.show { display: block; }
+.btn-row         { height: 3; padding: 1 0 0; align: left middle; }
+Button           { margin-right: 2; }
+"""
+        BINDINGS = [Binding("ctrl+q", "quit", "保存せず閉じる")]
+
+        def compose(self) -> ComposeResult:
+            yield Header(show_clock=False)
+            with VerticalScroll():
+                yield Label("── テーマ ───────────────────────────────────────────", classes="section")
+                with Horizontal(classes="row"):
+                    yield Label("テーマ:", classes="lbl")
+                    yield Select(THEME_OPTIONS, value=cur_theme, id="sel-theme")
+
+                yield Label("── カスタムカラー ────────────────────────────────────", classes="section")
+                yield Label("  (テーマに「カスタム」を選択した場合のみ有効)", classes="hint")
+                init_cls = "show" if cur_theme == "custom" else ""
+                with Vertical(id="custom-block", classes=init_cls):
+                    for cid, clabel in COLOR_FIELDS:
+                        default = DEFAULT_SETTINGS["custom_colors"].get(cid, "#000000")
+                        with Horizontal(classes="row"):
+                            yield Label(clabel, classes="lbl")
+                            yield Input(
+                                value=cur_colors.get(cid, default),
+                                id=f"col-{cid}",
+                                placeholder=default,
+                            )
+
+                yield Label("── キーバインド ──────────────────────────────────────", classes="section")
+                with Horizontal(classes="row"):
+                    yield Label("終了キー:", classes="lbl")
+                    yield Select(QUIT_OPTIONS, value=cur_quit, id="sel-quit")
+                with Horizontal(classes="row"):
+                    yield Label("保存キー:", classes="lbl")
+                    yield Select(SAVE_OPTIONS, value=cur_save, id="sel-save")
+
+                with Horizontal(classes="btn-row"):
+                    yield Button("保存して閉じる", id="btn-save",   variant="primary")
+                    yield Button("リセット",       id="btn-reset")
+                    yield Button("キャンセル",     id="btn-cancel", variant="error")
+            yield Footer()
+
+        def on_select_changed(self, event: Select.Changed) -> None:
+            if event.select.id != "sel-theme":
+                return
+            val = str(event.value) if event.value is not Select.BLANK else ""
+            block = self.query_one("#custom-block")
+            if val == "custom":
+                block.add_class("show")
+            else:
+                block.remove_class("show")
+                if val in THEMES:
+                    c = THEMES[val]
+                    for cid, _ in COLOR_FIELDS:
+                        try:
+                            self.query_one(f"#col-{cid}", Input).value = c.get(cid, "")
+                        except Exception:
+                            pass
+
+        def on_button_pressed(self, event: Button.Pressed) -> None:
+            bid = event.button.id
+            if bid == "btn-cancel":
+                self.exit()
+            elif bid == "btn-reset":
+                self._reset()
+            elif bid == "btn-save":
+                self._save()
+
+        def _reset(self) -> None:
+            try:
+                self.query_one("#sel-theme", Select).value = "catppuccin-mocha"
+                self.query_one("#sel-quit",  Select).value = "ctrl+q"
+                self.query_one("#sel-save",  Select).value = "ctrl+s"
+                c = THEMES["catppuccin-mocha"]
+                for cid, _ in COLOR_FIELDS:
+                    self.query_one(f"#col-{cid}", Input).value = c.get(cid, "")
+                self.query_one("#custom-block").remove_class("show")
+            except Exception:
+                pass
+            self.notify("デフォルト設定に戻しました")
+
+        def _save(self) -> None:
+            try:
+                theme    = str(self.query_one("#sel-theme", Select).value or "catppuccin-mocha")
+                quit_key = str(self.query_one("#sel-quit",  Select).value or "ctrl+q")
+                save_key = str(self.query_one("#sel-save",  Select).value or "ctrl+s")
+            except Exception:
+                self.notify("設定の読み取りに失敗しました", severity="error")
+                return
+            custom = {}
+            for cid, _ in COLOR_FIELDS:
+                dflt = DEFAULT_SETTINGS["custom_colors"].get(cid, "#000000")
+                raw = ""
+                try:
+                    raw = self.query_one(f"#col-{cid}", Input).value.strip()
+                except Exception:
+                    pass
+                custom[cid] = raw if (raw.startswith("#") and len(raw) in (4, 7)) else dflt
+            _save_settings({"theme": theme, "custom_colors": custom,
+                            "quit_key": quit_key, "save_key": save_key})
+            self.notify("設定を保存しました")
+            self.call_after_refresh(self.exit)
+
+    PeekSettingsApp().run()
 
 
 def _do_update():
@@ -684,9 +1047,10 @@ def _do_update():
 _ALL_FLAGS = [
     '-t', '--tui', '-b', '--browser',
     '-w', '--windows', '-l', '--linux', '-m', '--mac',
-    '-e', '--edit', '--update', '--help-en', '--help-ja', '--version', '-v',
+    '-e', '--edit', '-s', '--settings',
+    '--update', '--help-en', '--help-ja', '--version', '-v',
 ]
-_SHORT_FLAGS = set('tblmwev')
+_SHORT_FLAGS = set('tblmwevs')
 
 
 def _suggest_flag(arg):
@@ -711,6 +1075,7 @@ def main():
         print("    peek -t README.md       TUI で開く")
         print("    peek -t -e README.md    TUI エディタ（リアルタイムプレビュー）")
         print("    peek -e README.md       ブラウザライブエディタ")
+        print("    peek -s                 設定（テーマ・カラー・キーバインド）")
         print()
         print("  詳細: peek --help-ja  /  peek --help-en")
         sys.exit(1)
@@ -729,6 +1094,14 @@ def main():
 
     if args[0] in ("--update", "update"):
         _do_update()
+        sys.exit(0)
+
+    if args[0] in ("-s", "--settings"):
+        if len(args) > 1:
+            print("peek: '-s' は単独で使用してください（他のオプションやファイルと組み合わせられません）")
+            print("      詳細: peek --help-ja  /  peek --help-en")
+            sys.exit(1)
+        _run_settings()
         sys.exit(0)
 
     # Parse flags
@@ -752,6 +1125,10 @@ def main():
             tui_mode = False
         elif arg in ("-e", "--edit"):
             edit_mode = True
+        elif arg in ("-s", "--settings"):
+            print("peek: '-s' は単独で使用してください（他のオプションやファイルと組み合わせられません）")
+            print("      詳細: peek --help-ja  /  peek --help-en")
+            sys.exit(1)
         elif arg.startswith("-"):
             suggestion = _suggest_flag(arg)
             print(f"peek: 不明なオプション '{arg}'")
