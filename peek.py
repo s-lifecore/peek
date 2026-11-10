@@ -13,7 +13,7 @@ import difflib
 from pathlib import Path
 
 SUPPORTED_EXT = {'.md', '.markdown', '.txt', '.pdf'}
-VERSION = "1.7.0"
+VERSION = "1.8.0"
 MAX_FILE_BYTES = 10 * 1024 * 1024  # 10 MB
 
 HELP_EN = """peek {version} - GUI file viewer for WSL / Linux / macOS terminals
@@ -644,8 +644,14 @@ def main():
     file_path = args[0]
 
     if not os.path.exists(file_path):
-        print(f"peek: '{file_path}': No such file")
-        sys.exit(1)
+        if edit_mode:
+            new_path = Path(file_path)
+            new_path.parent.mkdir(parents=True, exist_ok=True)
+            new_path.touch()
+            print(f"peek: '{new_path.name}' を作成しました")
+        else:
+            print(f"peek: '{file_path}': No such file")
+            sys.exit(1)
 
     target_file = os.path.abspath(file_path)
     ext = Path(target_file).suffix.lower()
