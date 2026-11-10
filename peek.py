@@ -12,7 +12,7 @@ import socket
 from pathlib import Path
 
 SUPPORTED_EXT = {'.md', '.markdown', '.txt', '.pdf'}
-VERSION = "1.6.2"
+VERSION = "1.6.3"
 MAX_FILE_BYTES = 10 * 1024 * 1024  # 10 MB
 
 HELP_EN = """peek {version} - GUI file viewer for WSL / Linux / macOS terminals
@@ -40,6 +40,7 @@ SUPPORTED FILE TYPES:
 EXAMPLES:
   peek README.md             # browser (default, platform auto-detected)
   peek -t README.md          # TUI viewer
+  peek -t -e README.md       # TUI editor with live preview (Ctrl+S: save, Ctrl+Q: quit)
   peek -w README.md          # Windows browser
   peek -l notes.txt          # Linux browser
   peek -m README.md          # macOS browser
@@ -76,6 +77,7 @@ HELP_JA = """peek {version} - WSL / Linux / macOS ターミナル用 GUI ファ�
 使用例:
   peek README.md             # ブラウザで開く（デフォルト・OS 自動検出）
   peek -t README.md          # TUI ビューア
+  peek -t -e README.md       # TUI エディタ（リアルタイムプレビュー / Ctrl+S: 保存 / Ctrl+Q: 終了）
   peek -w README.md          # Windows ブラウザ
   peek -l notes.txt          # Linux ブラウザ
   peek -m README.md          # macOS ブラウザ
@@ -395,12 +397,12 @@ def create_app(target_file, access_token, platform="windows", edit_mode=False):
     return app
 
 
-def _run_tui(target_file):
+def _run_tui(target_file, edit_mode=False):
     try:
         from textual.app import App, ComposeResult
-        from textual.widgets import Header, Footer, Markdown, Static
+        from textual.widgets import Header, Footer, Markdown, Static, TextArea
         from textual.binding import Binding
-        from textual.containers import VerticalScroll
+        from textual.containers import Horizontal, Vertical, VerticalScroll
     except ImportError:
         print("peek: textual が見つかりません。セットアップを再実行してください:")
         print("      bash setup.sh")
@@ -437,6 +439,56 @@ def _run_tui(target_file):
 
     TYPE_LABEL = {'markdown': 'MD', 'text': 'TXT', 'pdf': 'PDF'}
 
+    # ── TUI 編集モード (-t -e) ────────────────────────────────────────────────
+    if edit_mode:
+        if file_type == 'pdf':
+            print("peek: PDF ファイルは TUI 編集モードに対応していません。")
+            sys.exit(1)
+
+        class PeekEditApp(App):
+            TITLE = path.name
+            SUB_TITLE = f"{TYPE_LABEL.get(file_type, '')}  ✎"
+            CSS = """
+            Screen        { background: #1e1e2e; }
+            Header        { background: #181825; color: #cdd6f4; }
+            Footer        { background: #181825; color: #6c7086; }
+            Horizontal    { height: 1fr; }
+            #editor-pane  { width: 1fr; height: 1fr; border-right: solid #313244; }
+            #preview-pane { width: 1fr; height: 1fr; }
+            TextArea      { height: 1fr; background: #1e1e2e; }
+            Markdown      { height: 1fr; padding: 0 1; background: #1e1e2e; }
+            """
+            BINDINGS = [
+                Binding("ctrl+s", "save", "保存", priority=True),
+                Binding("ctrl+q", "quit", "終了", priority=True),
+            ]
+
+            def compose(self) -> ComposeResult:
+                yield Header(show_clock=False)
+                if file_type == 'markdown':
+                    with Horizontal():
+                        with Vertical(id='editor-pane'):
+                            yield TextArea(content, id='editor', language='markdown')
+                        with Vertical(id='preview-pane'):
+                            yield Markdown(content, id='preview')
+                else:
+                    yield TextArea(content, id='editor')
+                yield Footer()
+
+            async def on_text_area_changed(self, event: TextArea.Changed) -> None:
+                if file_type == 'markdown':
+                    new_text = self.query_one('#editor', TextArea).text
+                    await self.query_one('#preview', Markdown).update(new_text)
+
+            def action_save(self) -> None:
+                editor = self.query_one('#editor', TextArea)
+                path.write_text(editor.text, encoding='utf-8')
+                self.notify("保存しました")
+
+        PeekEditApp().run()
+        return
+
+    # ── TUI 閲覧モード (-t) ───────────────────────────────────────────────────
     class PeekApp(App):
         TITLE = path.name
         SUB_TITLE = TYPE_LABEL.get(file_type, '')
@@ -551,7 +603,6 @@ def main():
             tui_mode = False
         elif arg in ("-e", "--edit"):
             edit_mode = True
-            tui_mode = False
         elif arg.startswith("-"):
             print(f"peek: 不明なオプション '{arg}'")
             print("      詳細: peek --help-ja  /  peek --help-en")
@@ -580,7 +631,7 @@ def main():
         sys.exit(1)
 
     if tui_mode:
-        _run_tui(target_file)
+        _run_tui(target_file, edit_mode=edit_mode)
         sys.exit(0)
 
     port = find_free_port()
