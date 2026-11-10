@@ -13,7 +13,7 @@ import difflib
 from pathlib import Path
 
 SUPPORTED_EXT = {'.md', '.markdown', '.txt', '.pdf'}
-VERSION = "1.9.0"
+VERSION = "1.10.0"
 MAX_FILE_BYTES = 10 * 1024 * 1024  # 10 MB
 
 HELP_EN = """peek {version} - GUI file viewer for WSL / Linux / macOS terminals
@@ -400,6 +400,12 @@ def create_app(target_file, access_token, platform="windows", edit_mode=False):
     def serve_raw():
         _check_size(Path(target_file))
         return send_file(target_file)
+
+    @app.route("/source")
+    def serve_source():
+        """Return raw file bytes for browser-side File System Access API."""
+        _check_size(Path(target_file))
+        return send_file(target_file, as_attachment=False)
 
     @app.route("/download")
     def download():

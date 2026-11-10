@@ -568,6 +568,7 @@
 
   <script>
     const PLATFORM = "{{ platform }}";
+    const EDIT_MODE = {{ 'true' if edit_mode else 'false' }};
 
     function showToast(msg, type) {
       const t = document.getElementById('toast');
@@ -596,7 +597,34 @@
       setTimeout(() => URL.revokeObjectURL(objectUrl), 1000);
     }
 
-    function openSaveAs() {
+    async function openSaveAs() {
+      if ('showSaveFilePicker' in window) {
+        const fname = '{{ filename }}';
+        const ext   = fname.includes('.') ? fname.split('.').pop().toLowerCase() : '';
+        const mimes = { md: 'text/markdown', markdown: 'text/markdown',
+                        txt: 'text/plain', pdf: 'application/pdf' };
+        const mime  = mimes[ext] || 'application/octet-stream';
+        try {
+          const handle = await window.showSaveFilePicker({
+            suggestedName: fname,
+            types: ext ? [{ description: fname, accept: { [mime]: ['.' + ext] } }] : [],
+          });
+          const writable = await handle.createWritable();
+          if (EDIT_MODE && typeof editor !== 'undefined') {
+            await writable.write(editor.value);
+          } else {
+            const res = await fetch('/source');
+            if (!res.ok) throw new Error(`HTTP ${res.status}`);
+            await writable.write(await res.blob());
+          }
+          await writable.close();
+          showToast(`保存しました: ${handle.name}`, 'success');
+        } catch (e) {
+          if (e.name !== 'AbortError') showToast('保存に失敗しました', 'error');
+        }
+        return;
+      }
+      // Fallback for Firefox / Safari — text input modal
       document.getElementById('save-as-modal').classList.remove('hidden');
       const input = document.getElementById('save-as-path');
       input.focus();
