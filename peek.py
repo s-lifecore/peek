@@ -15,7 +15,7 @@ import difflib
 from pathlib import Path
 
 SUPPORTED_EXT = {'.md', '.markdown', '.txt', '.pdf'}
-VERSION = "1.16.2"
+VERSION = "1.16.3"
 MAX_FILE_BYTES = 10 * 1024 * 1024  # 10 MB
 
 CONFIG_FILE = Path.home() / ".config" / "peek" / "settings.json"

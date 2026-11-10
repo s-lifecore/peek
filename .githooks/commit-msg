@@ -21,6 +21,10 @@ echo "$COMMIT_MSG" | grep -qE "^(Merge|Revert)" && exit 0
 CURRENT=$(grep -oP 'VERSION = "\K[0-9]+\.[0-9]+\.[0-9]+' "$PEEK_FILE")
 [ -z "$CURRENT" ] && exit 0
 
+# Skip if version is already bumped ahead of HEAD (previous hook run staged it)
+HEAD_VERSION=$(git show HEAD:peek.py 2>/dev/null | grep -oP 'VERSION = "\K[0-9]+\.[0-9]+\.[0-9]+' || echo "")
+[ -n "$HEAD_VERSION" ] && [ "$CURRENT" != "$HEAD_VERSION" ] && exit 0
+
 MAJOR=$(echo "$CURRENT" | cut -d. -f1)
 MINOR=$(echo "$CURRENT" | cut -d. -f2)
 PATCH=$(echo "$CURRENT" | cut -d. -f3)
