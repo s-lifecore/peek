@@ -15,7 +15,7 @@ import difflib
 from pathlib import Path
 
 SUPPORTED_EXT = {'.md', '.markdown', '.txt', '.pdf'}
-VERSION = "1.13.1"
+VERSION = "1.14.0"
 MAX_FILE_BYTES = 10 * 1024 * 1024  # 10 MB
 
 CONFIG_FILE = Path.home() / ".config" / "peek" / "settings.json"
@@ -509,10 +509,7 @@ def create_app(target_file, access_token, platform="windows", edit_mode=False):
                 return jsonify({"success": False, "error": _sanitize_error(str(e2))}), 500
 
         if platform == "windows":
-            if _win_downloads:
-                dest = _local_save(str(output_pdf), downloads_dir=_win_downloads)
-                return jsonify({"success": True, "filename": output_pdf.name,
-                                "path": dest, "platform": platform})
+            # Windows: ブラウザ側の showSaveFilePicker で保存場所を選ばせる
             return jsonify({"success": True, "filename": output_pdf.name, "platform": "windows"})
         dest = _local_save(str(output_pdf))
         return jsonify({"success": True, "filename": output_pdf.name,

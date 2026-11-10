@@ -774,7 +774,26 @@
         if (data.success) {
           btn.classList.add('success');
           label.textContent = '完了';
-          if (data.path) {
+          if (data.platform === 'windows' && 'showSaveFilePicker' in window) {
+            // Windows: ネイティブファイルダイアログで保存先を選択
+            try {
+              const handle = await window.showSaveFilePicker({
+                suggestedName: data.filename,
+                types: [{ description: 'PDF ファイル', accept: { 'application/pdf': ['.pdf'] } }],
+              });
+              const pdfRes = await fetch('/download-pdf');
+              if (!pdfRes.ok) throw new Error(`HTTP ${pdfRes.status}`);
+              const writable = await handle.createWritable();
+              await writable.write(await pdfRes.blob());
+              await writable.close();
+              showToast(`保存しました: ${handle.name}`, 'success');
+            } catch (e) {
+              if (e.name !== 'AbortError') {
+                await triggerBrowserDownload('/download-pdf', data.filename);
+              }
+            }
+            setTimeout(() => resetBtn(btn, label, 'PDF 生成'), 3000);
+          } else if (data.path) {
             showToast(`保存: ${data.path}`, 'success');
             setTimeout(() => resetBtn(btn, label, 'PDF 生成'), 3000);
           } else {
