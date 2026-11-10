@@ -9,10 +9,11 @@ import subprocess
 import threading
 import time
 import socket
+import difflib
 from pathlib import Path
 
 SUPPORTED_EXT = {'.md', '.markdown', '.txt', '.pdf'}
-VERSION = "1.6.3"
+VERSION = "1.7.0"
 MAX_FILE_BYTES = 10 * 1024 * 1024  # 10 MB
 
 HELP_EN = """peek {version} - GUI file viewer for WSL / Linux / macOS terminals
@@ -26,7 +27,7 @@ OPTIONS:
   -w, --windows         Browser: Windows default browser, save to Windows
   -l, --linux           Browser: Linux default browser, save to ~/Downloads/
   -m, --mac             Browser: macOS default browser, save to ~/Downloads/
-  -e, --edit            Edit mode: detach server + open live editor in browser
+  -e, --edit            Edit mode: browser live editor (detached server) or TUI editor with -t
   --update              Pull latest version from git and reinstall deps
   --help-en             Show this help (English)
   --help-ja             Show help in Japanese
@@ -63,7 +64,7 @@ HELP_JA = """peek {version} - WSL / Linux / macOS ターミナル用 GUI ファ�
   -w, --windows         ブラウザ: Windows のデフォルトブラウザ・Windows に保存
   -l, --linux           ブラウザ: Linux のデフォルトブラウザ・~/Downloads/ に保存
   -m, --mac             ブラウザ: macOS のデフォルトブラウザ・~/Downloads/ に保存
-  -e, --edit            編集モード: バックグラウンドサーバー + ブラウザライブエディタ
+  -e, --edit            編集モード: ブラウザライブエディタ（バックグラウンド）/ -t と組み合わせて TUI エディタ
   --update              git から最新版を取得して依存関係を更新
   --help-en             英語のヘルプを表示
   --help-ja             このヘルプを表示（日本語）
@@ -445,18 +446,20 @@ def _run_tui(target_file, edit_mode=False):
             print("peek: PDF ファイルは TUI 編集モードに対応していません。")
             sys.exit(1)
 
+        from rich.markdown import Markdown as RichMarkdown
+
         class PeekEditApp(App):
             TITLE = path.name
             SUB_TITLE = f"{TYPE_LABEL.get(file_type, '')}  ✎"
             CSS = """
-            Screen        { background: #1e1e2e; }
-            Header        { background: #181825; color: #cdd6f4; }
-            Footer        { background: #181825; color: #6c7086; }
-            Horizontal    { height: 1fr; }
-            #editor-pane  { width: 1fr; height: 1fr; border-right: solid #313244; }
-            #preview-pane { width: 1fr; height: 1fr; }
-            TextArea      { height: 1fr; background: #1e1e2e; }
-            Markdown      { height: 1fr; padding: 0 1; background: #1e1e2e; }
+            Screen         { background: #1e1e2e; }
+            Header         { background: #181825; color: #cdd6f4; }
+            Footer         { background: #181825; color: #6c7086; }
+            Horizontal     { height: 1fr; }
+            #editor-pane   { width: 1fr; height: 1fr; border-right: solid #313244; }
+            #preview-pane  { width: 1fr; height: 1fr; background: #1e1e2e; }
+            TextArea       { height: 1fr; background: #1e1e2e; }
+            #preview-content { padding: 0 1; color: #cdd6f4; }
             """
             BINDINGS = [
                 Binding("ctrl+s", "save", "保存", priority=True),
@@ -469,16 +472,16 @@ def _run_tui(target_file, edit_mode=False):
                     with Horizontal():
                         with Vertical(id='editor-pane'):
                             yield TextArea(content, id='editor', language='markdown')
-                        with Vertical(id='preview-pane'):
-                            yield Markdown(content, id='preview')
+                        with VerticalScroll(id='preview-pane'):
+                            yield Static(RichMarkdown(content), id='preview-content')
                 else:
                     yield TextArea(content, id='editor')
                 yield Footer()
 
-            async def on_text_area_changed(self, event: TextArea.Changed) -> None:
+            def on_text_area_changed(self, event: TextArea.Changed) -> None:
                 if file_type == 'markdown':
                     new_text = self.query_one('#editor', TextArea).text
-                    await self.query_one('#preview', Markdown).update(new_text)
+                    self.query_one('#preview-content', Static).update(RichMarkdown(new_text))
 
             def action_save(self) -> None:
                 editor = self.query_one('#editor', TextArea)
@@ -551,6 +554,24 @@ def _do_update():
     print("peek: Done! Run 'peek --version' to verify.")
 
 
+_ALL_FLAGS = [
+    '-t', '--tui', '-b', '--browser',
+    '-w', '--windows', '-l', '--linux', '-m', '--mac',
+    '-e', '--edit', '--update', '--help-en', '--help-ja', '--version', '-v',
+]
+_SHORT_FLAGS = set('tblmwev')
+
+
+def _suggest_flag(arg):
+    # e.g. "-te" → "-t -e"
+    if (arg.startswith('-') and not arg.startswith('--')
+            and len(arg) > 2
+            and all(c in _SHORT_FLAGS for c in arg[1:])):
+        return ' '.join(f'-{c}' for c in arg[1:])
+    matches = difflib.get_close_matches(arg, _ALL_FLAGS, n=1, cutoff=0.6)
+    return matches[0] if matches else None
+
+
 def main():
     args = sys.argv[1:]
 
@@ -559,9 +580,10 @@ def main():
         print()
         print("  使い方: peek [オプション] <ファイル>")
         print()
-        print("    peek README.md       ブラウザで開く（デフォルト）")
-        print("    peek -t README.md    TUI で開く")
-        print("    peek -e README.md    ブラウザライブエディタ")
+        print("    peek README.md          ブラウザで開く（デフォルト）")
+        print("    peek -t README.md       TUI で開く")
+        print("    peek -t -e README.md    TUI エディタ（リアルタイムプレビュー）")
+        print("    peek -e README.md       ブラウザライブエディタ")
         print()
         print("  詳細: peek --help-ja  /  peek --help-en")
         sys.exit(1)
@@ -604,7 +626,10 @@ def main():
         elif arg in ("-e", "--edit"):
             edit_mode = True
         elif arg.startswith("-"):
+            suggestion = _suggest_flag(arg)
             print(f"peek: 不明なオプション '{arg}'")
+            if suggestion:
+                print(f"      もしかして: {suggestion}")
             print("      詳細: peek --help-ja  /  peek --help-en")
             sys.exit(1)
         else:
