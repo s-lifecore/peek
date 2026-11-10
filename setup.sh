@@ -1,0 +1,36 @@
+#!/bin/bash
+set -e
+
+INSTALL_DIR="$HOME/.local/bin"
+VENV_DIR="$HOME/.local/share/peek-venv"
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+
+echo "peek: Creating Python virtual environment..."
+python3 -m venv "$VENV_DIR"
+
+echo "peek: Installing dependencies..."
+"$VENV_DIR/bin/pip" install -r "$SCRIPT_DIR/requirements.txt" --quiet
+
+echo "peek: Installing CLI command..."
+mkdir -p "$INSTALL_DIR"
+
+cat > "$INSTALL_DIR/peek" << EOF
+#!/bin/bash
+exec "$VENV_DIR/bin/python" "$SCRIPT_DIR/peek.py" "\$@"
+EOF
+
+chmod +x "$INSTALL_DIR/peek"
+
+echo ""
+echo "Done!  'peek' command installed."
+echo ""
+
+if [[ ":$PATH:" != *":$HOME/.local/bin:"* ]]; then
+  echo "Add the following to your ~/.bashrc to use 'peek' from anywhere:"
+  echo "  export PATH=\"\$HOME/.local/bin:\$PATH\""
+  echo ""
+  echo "Then reload: source ~/.bashrc"
+  echo ""
+fi
+
+echo "Try it: peek --help-ja"
