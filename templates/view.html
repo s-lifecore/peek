@@ -799,6 +799,7 @@
 
   {% if edit_mode and file_type != 'pdf' %}
   <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/dompurify@3/dist/purify.min.js"></script>
   <script>
     const editor   = document.getElementById('editor');
     const filename = "{{ filename }}";
@@ -818,7 +819,8 @@
     marked.setOptions({ breaks: true, gfm: true });
 
     function updatePreview() {
-      preview.innerHTML = marked.parse(editor.value);
+      const raw = marked.parse(editor.value);
+      preview.innerHTML = typeof DOMPurify !== 'undefined' ? DOMPurify.sanitize(raw) : raw;
       preview.querySelectorAll('pre code').forEach(el => {
         if (typeof hljs !== 'undefined') hljs.highlightElement(el);
       });

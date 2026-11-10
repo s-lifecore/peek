@@ -3,6 +3,7 @@
 
 import sys
 import os
+import re
 import shutil
 import secrets
 import subprocess
@@ -13,7 +14,7 @@ import difflib
 from pathlib import Path
 
 SUPPORTED_EXT = {'.md', '.markdown', '.txt', '.pdf'}
-VERSION = "1.11.0"
+VERSION = "1.12.0"
 MAX_FILE_BYTES = 10 * 1024 * 1024  # 10 MB
 
 HELP_EN = """peek {version} - GUI file viewer for WSL / Linux / macOS terminals
@@ -219,6 +220,25 @@ def _default_save_display(platform, win_downloads, filename):
     return str(downloads)
 
 
+# Compiled once at import time for performance
+_RE_DANGEROUS_TAG = re.compile(
+    r'<\s*(?:script|style|iframe|object|embed|form|base|link|meta)'
+    r'(?:\s[^>]*)?>.*?</\s*(?:script|style|iframe|object|embed|form|base|link|meta)\s*>'
+    r'|<\s*(?:script|style|iframe|object|embed|form|base|link|meta)(?:\s[^>]*)?/?>',
+    re.DOTALL | re.IGNORECASE,
+)
+_RE_EVENT_HANDLER = re.compile(r'\s+on\w+\s*=\s*(?:"[^"]*"|\'[^\']*\'|[^\s>]+)', re.IGNORECASE)
+_RE_JS_URL = re.compile(r'(href|src|action)\s*=\s*["\']?\s*javascript:', re.IGNORECASE)
+
+
+def _sanitize_html(html):
+    """Strip dangerous tags, event handlers, and javascript: URLs from HTML."""
+    html = _RE_DANGEROUS_TAG.sub('', html)
+    html = _RE_EVENT_HANDLER.sub('', html)
+    html = _RE_JS_URL.sub(r'\1="#"', html)
+    return html
+
+
 def _make_restricted_fetcher(allowed_dir):
     """Return a weasyprint URL fetcher that blocks file:// outside allowed_dir."""
     from weasyprint import URLFetcher
@@ -351,10 +371,11 @@ def create_app(target_file, access_token, platform="windows", edit_mode=False):
 
     def _render_md(path):
         content = path.read_text(encoding="utf-8")
-        return markdown2.markdown(
+        raw_html = markdown2.markdown(
             content,
             extras=["fenced-code-blocks", "tables", "strike", "task_list", "header-ids"],
         )
+        return _sanitize_html(raw_html)
 
     # ── Routes ────────────────────────────────────────────────────────────────
 
@@ -390,6 +411,9 @@ def create_app(target_file, access_token, platform="windows", edit_mode=False):
     def save_content():
         if not edit_mode:
             abort(403)
+        # Refuse to write through symlinks
+        if Path(target_file).is_symlink():
+            abort(403)
         data = request.get_json(silent=True)
         if not data or "content" not in data:
             abort(400)
@@ -398,13 +422,19 @@ def create_app(target_file, access_token, platform="windows", edit_mode=False):
 
     @app.route("/raw")
     def serve_raw():
-        _check_size(Path(target_file))
+        path = Path(target_file)
+        if path.suffix.lower() not in SUPPORTED_EXT:
+            abort(415)
+        _check_size(path)
         return send_file(target_file)
 
     @app.route("/source")
     def serve_source():
         """Return raw file bytes for browser-side File System Access API."""
-        _check_size(Path(target_file))
+        path = Path(target_file)
+        if path.suffix.lower() not in SUPPORTED_EXT:
+            abort(415)
+        _check_size(path)
         return send_file(target_file, as_attachment=False)
 
     @app.route("/download")
@@ -450,6 +480,9 @@ def create_app(target_file, access_token, platform="windows", edit_mode=False):
         return jsonify({"success": True, "filename": output_pdf.name,
                         "path": dest, "platform": platform})
 
+    # Extensions allowed as save-as destinations (edit targets only, not .pdf)
+    _SAVEABLE_EXT = {'.md', '.markdown', '.txt'}
+
     @app.route("/save-as", methods=["POST"])
     def save_as():
         """Save file to a user-specified path (Save As dialog)."""
@@ -458,9 +491,18 @@ def create_app(target_file, access_token, platform="windows", edit_mode=False):
         content = data.get("content")  # present in edit mode, absent in view mode
         if not dest_str:
             return jsonify({"success": False, "error": "パスが空です"}), 400
-        dest = Path(_normalize_path(dest_str)).expanduser()
-        if not dest.suffix:
-            return jsonify({"success": False, "error": "ファイル名を指定してください"}), 400
+
+        dest = Path(_normalize_path(dest_str)).expanduser().resolve()
+
+        # Allow only supported text extensions to prevent writing to arbitrary files
+        if dest.suffix.lower() not in (_SAVEABLE_EXT | {'.pdf'}):
+            return jsonify({"success": False,
+                            "error": f"保存できる拡張子: {', '.join(sorted(_SAVEABLE_EXT | {'.pdf'}))}"}), 400
+
+        # Refuse to overwrite an existing symlink (prevents symlink-based file replacement)
+        if dest.is_symlink():
+            return jsonify({"success": False, "error": "シンボリックリンクへの保存は許可されていません"}), 400
+
         try:
             dest.parent.mkdir(parents=True, exist_ok=True)
             if content is not None:
@@ -469,7 +511,7 @@ def create_app(target_file, access_token, platform="windows", edit_mode=False):
                 shutil.copy2(target_file, str(dest))
             return jsonify({"success": True, "path": str(dest)})
         except Exception as e:
-            return jsonify({"success": False, "error": _sanitize_error(str(e))}), 500
+            return jsonify({"success": False, "error": "ファイルの保存に失敗しました"}), 500
 
     @app.route("/download-pdf")
     def download_pdf():
