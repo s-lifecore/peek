@@ -459,6 +459,22 @@
       btn.disabled = false;
     }
 
+    // Fetch the URL as a Blob and trigger a native browser download dialog.
+    // More reliable than window.location.href in WSL+Windows browser environments.
+    async function triggerBrowserDownload(url, filename) {
+      const res = await fetch(url);
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const blob = await res.blob();
+      const objectUrl = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = objectUrl;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      setTimeout(() => URL.revokeObjectURL(objectUrl), 1000);
+    }
+
     async function downloadSource() {
       const btn = document.getElementById('dl-btn');
       const label = btn.querySelector('.btn-label');
@@ -482,13 +498,17 @@
             setTimeout(() => resetBtn(btn, label, '保存'), 3000);
           }
         } else {
-          // Windows: browser handles the download, restore button after short delay
-          window.location.href = '/download';
-          setTimeout(() => resetBtn(btn, label, '保存'), 1500);
+          await triggerBrowserDownload('/download', '{{ filename }}');
+          btn.classList.remove('loading');
+          btn.classList.add('success');
+          label.textContent = '完了';
+          setTimeout(() => resetBtn(btn, label, '保存'), 2000);
         }
       } catch (e) {
         btn.classList.remove('loading');
-        resetBtn(btn, label, '保存');
+        btn.classList.add('error');
+        label.textContent = 'エラー';
+        setTimeout(() => resetBtn(btn, label, '保存'), 3000);
       }
     }
 
@@ -509,11 +529,12 @@
           label.textContent = '完了';
           if (data.save_mode === 'linux') {
             showToast(`保存: ${data.path}`, 'success');
+            setTimeout(() => resetBtn(btn, label, 'PDF 生成'), 3000);
           } else {
             showToast(`${data.filename} を生成しました`, 'success');
-            window.location.href = '/download-pdf';
+            await triggerBrowserDownload('/download-pdf', data.filename);
+            setTimeout(() => resetBtn(btn, label, 'PDF 生成'), 2000);
           }
-          setTimeout(() => resetBtn(btn, label, 'PDF 生成'), 3000);
         } else {
           btn.classList.add('error');
           label.textContent = 'エラー';
