@@ -15,7 +15,7 @@ import difflib
 from pathlib import Path
 
 SUPPORTED_EXT = {'.md', '.markdown', '.txt', '.pdf'}
-VERSION = "1.15.1"
+VERSION = "1.16.0"
 MAX_FILE_BYTES = 10 * 1024 * 1024  # 10 MB
 
 CONFIG_FILE = Path.home() / ".config" / "peek" / "settings.json"
@@ -1131,7 +1131,6 @@ def _run_catch():
     try:
         from textual.app import App, ComposeResult
         from textual.widgets import Static
-        from textual.binding import Binding
         import random
         import math
     except ImportError:
@@ -1142,21 +1141,14 @@ def _run_catch():
     CAT_NORMAL = "ฅ(^•ω•^)ฅ"
     CAT_SCARED = "ฅ( >ω<)ฅ"
     CAT_CAUGHT = "ฅ(×.×)ฅ "
+    P_LEN = len(PLAYER)
+    C_LEN = len(CAT_NORMAL)
 
     class _CatchApp(App):
         CSS = """
 Screen  { background: #1e1e2e; }
 #canvas { width: 100%; height: 100%; }
 """
-        BINDINGS = [
-            Binding("up",     "move('up')",    "", show=False),
-            Binding("down",   "move('down')",  "", show=False),
-            Binding("left",   "move('left')",  "", show=False),
-            Binding("right",  "move('right')", "", show=False),
-            Binding("q",      "quit",          "", show=False),
-            Binding("escape", "quit",          "", show=False),
-        ]
-
         def compose(self) -> ComposeResult:
             yield Static("", id="canvas")
 
@@ -1166,15 +1158,27 @@ Screen  { background: #1e1e2e; }
             self._H = rows - 3
             self._px = float(self._W // 2)
             self._py = float(self._H // 2)
-            self._cx = float(random.choice([2, self._W - 12]))
+            self._cx = float(random.choice([2, self._W - C_LEN - 2]))
             self._cy = float(random.choice([2, self._H - 3]))
             self._caught = False
             self._steps = 0
             self._render()
             self._schedule_cat()
 
+        def _clamp_player(self):
+            self._px = max(0.0, min(float(self._W - P_LEN), self._px))
+            self._py = max(0.0, min(float(self._H - 1), self._py))
+
+        def _clamp_cat(self):
+            self._cx = max(0.0, min(float(self._W - C_LEN), self._cx))
+            self._cy = max(0.0, min(float(self._H - 1), self._cy))
+
         def _dist(self):
             return math.sqrt((self._px - self._cx) ** 2 + (self._py - self._cy) ** 2)
+
+        def _check_catch(self):
+            if abs(self._px - self._cx) <= 2 and abs(self._py - self._cy) <= 1:
+                self._caught = True
 
         def _schedule_cat(self):
             d = self._dist()
@@ -1184,7 +1188,6 @@ Screen  { background: #1e1e2e; }
         def _move_cat(self):
             if self._caught:
                 return
-            W, H = self._W, self._H
             dx = self._cx - self._px
             dy = self._cy - self._py
             d = max(0.1, math.sqrt(dx * dx + dy * dy))
@@ -1192,10 +1195,10 @@ Screen  { background: #1e1e2e; }
             speed = 2.0 if d < 8 else 1.0
             if random.random() < 0.25:
                 nx, ny = -ny * random.choice([-1, 1]), nx * random.choice([-1, 1])
-            self._cx = max(1.0, min(float(W - 11), self._cx + nx * speed))
-            self._cy = max(1.0, min(float(H - 2),  self._cy + ny * speed))
-            if abs(self._px - self._cx) <= 2 and abs(self._py - self._cy) <= 1:
-                self._caught = True
+            self._cx += nx * speed
+            self._cy += ny * speed
+            self._clamp_cat()
+            self._check_catch()
             self._render()
             if not self._caught:
                 self._schedule_cat()
@@ -1211,21 +1214,18 @@ Screen  { background: #1e1e2e; }
                         grid[row][c] = f"{color}{ch}\x1b[0m"
 
             py = max(0, min(H - 1, int(round(self._py))))
-            px = max(0, min(W - len(PLAYER) - 1, int(round(self._px))))
+            px = max(0, min(W - P_LEN, int(round(self._px))))
             put(py, px, PLAYER, "\x1b[33m")
 
             cy = max(0, min(H - 1, int(round(self._cy))))
-            cx = max(0, min(W - 11, int(round(self._cx))))
+            cx = max(0, min(W - C_LEN, int(round(self._cx))))
             d = self._dist()
             if self._caught:
-                cat = CAT_CAUGHT
-                cat_color = "\x1b[32m"
+                cat, cat_color = CAT_CAUGHT, "\x1b[32m"
             elif d < 8:
-                cat = CAT_SCARED
-                cat_color = "\x1b[91m"
+                cat, cat_color = CAT_SCARED, "\x1b[91m"
             else:
-                cat = CAT_NORMAL
-                cat_color = "\x1b[35m"
+                cat, cat_color = CAT_NORMAL, "\x1b[35m"
             put(cy, cx, cat, cat_color)
 
             lines = "\n".join("".join(row) for row in grid)
@@ -1235,17 +1235,30 @@ Screen  { background: #1e1e2e; }
                 status = f"\x1b[2;37m 矢印キーで追いかけよう  q: 終了\x1b[0m"
             self.query_one("#canvas", Static).update(lines + "\n" + status)
 
-        def action_move(self, direction: str) -> None:
+        def on_key(self, event) -> None:
+            key = event.key
+            if key in ("q", "escape"):
+                self.exit()
+                return
             if self._caught:
                 return
-            W, H = self._W, self._H
-            if direction == "up":    self._py = max(0.0, self._py - 1)
-            elif direction == "down":  self._py = min(float(H - 1), self._py + 1)
-            elif direction == "left":  self._px = max(0.0, self._px - 1)
-            elif direction == "right": self._px = min(float(W - len(PLAYER) - 1), self._px + 1)
+            if key == "up":
+                event.prevent_default()
+                self._py -= 1
+            elif key == "down":
+                event.prevent_default()
+                self._py += 1
+            elif key == "left":
+                event.prevent_default()
+                self._px -= 1
+            elif key == "right":
+                event.prevent_default()
+                self._px += 1
+            else:
+                return
+            self._clamp_player()
             self._steps += 1
-            if abs(self._px - self._cx) <= 2 and abs(self._py - self._cy) <= 1:
-                self._caught = True
+            self._check_catch()
             self._render()
 
     _CatchApp().run()
