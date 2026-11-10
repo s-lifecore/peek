@@ -12,7 +12,7 @@ import socket
 from pathlib import Path
 
 SUPPORTED_EXT = {'.md', '.markdown', '.txt', '.pdf'}
-VERSION = "1.6.1"
+VERSION = "1.6.2"
 MAX_FILE_BYTES = 10 * 1024 * 1024  # 10 MB
 
 HELP_EN = """peek {version} - GUI file viewer for WSL / Linux / macOS terminals
@@ -503,7 +503,15 @@ def main():
     args = sys.argv[1:]
 
     if not args:
-        print("peek: No file specified. Try 'peek --help-en' or 'peek --help-ja'")
+        print(f"peek {VERSION}  —  ファイルビューア for WSL / Linux / macOS")
+        print()
+        print("  使い方: peek [オプション] <ファイル>")
+        print()
+        print("    peek README.md       ブラウザで開く（デフォルト）")
+        print("    peek -t README.md    TUI で開く")
+        print("    peek -e README.md    ブラウザライブエディタ")
+        print()
+        print("  詳細: peek --help-ja  /  peek --help-en")
         sys.exit(1)
 
     if args[0] in ("-h", "--help", "--help-en"):
@@ -544,12 +552,17 @@ def main():
         elif arg in ("-e", "--edit"):
             edit_mode = True
             tui_mode = False
+        elif arg.startswith("-"):
+            print(f"peek: 不明なオプション '{arg}'")
+            print("      詳細: peek --help-ja  /  peek --help-en")
+            sys.exit(1)
         else:
             clean_args.append(arg)
     args = clean_args
 
     if not args:
-        print("peek: No file specified. Try 'peek --help-en' or 'peek --help-ja'")
+        print("peek: ファイルが指定されていません。")
+        print("      使い方: peek [オプション] <ファイル>")
         sys.exit(1)
 
     file_path = args[0]

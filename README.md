@@ -209,6 +209,33 @@ PDF 生成は [pandoc](https://pandoc.org/) が入っていれば優先的に使
 
 ## 注意事項
 
+**`peek` だけ打ったら何も起きない / エラーになる**
+
+ファイルパスが必要です。使い方の概要が表示されます。
+
+```
+$ peek
+peek 1.6.x  —  ファイルビューア for WSL / Linux / macOS
+
+  使い方: peek [オプション] <ファイル>
+
+    peek README.md       ブラウザで開く（デフォルト）
+    peek -t README.md    TUI で開く
+    peek -e README.md    ブラウザライブエディタ
+
+  詳細: peek --help-ja  /  peek --help-en
+```
+
+**`peek -list` など存在しないオプションを指定した**
+
+不明なオプションはエラーになります。
+
+```
+$ peek -list README.md
+peek: 不明なオプション '-list'
+      詳細: peek --help-ja  /  peek --help-en
+```
+
 **`peek: command not found` と表示される**
 
 PATH が通っていません。以下を実行してください。
