@@ -1,6 +1,6 @@
 # peek
 
-WSL / Linux / macOS ターミナルから `.md` `.txt` `.pdf` を開く CLI ビューアです。  
+WSL / Linux / macOS ターミナルから各種ファイルを開く CLI ビューアです。  
 ブラウザでの高品質レンダリングと、ターミナルを離れない TUI モードの両方に対応しています。
 
 ```bash
@@ -18,15 +18,18 @@ peek -s                 # 設定画面を開く
 - **TUI エディタ** — `-t -e` でリアルタイムプレビュー付きの分割エディタ
 - **ブラウザモード** — OS を自動検出し、適切なブラウザで開く
 - **PDF ビューア** — ブラウザのネイティブ PDF ビューア、TUI では pdftotext でテキスト抽出
+- **画像ビューア** — PNG / JPG / GIF / WEBP / SVG をブラウザで表示、TUI では chafa でプレビュー
+- **CSV / TSV ビューア** — ブラウザでソート対応テーブル表示、TUI ではテキスト表形式
 - **テキスト表示** — 行番号付きで等幅フォント表示
 - **PDF 生成** — `.md` から PDF を直接生成（pandoc / weasyprint 対応）
 - **ライブ編集モード** — `-e` でサーバーをバックグラウンドに切り離し、ブラウザ上でリアルタイム編集
 - **名前を付けて保存** — ブラウザのネイティブファイルダイアログで保存先を指定
-- **設定画面** — `-s` でテーマ・カラー・キーバインドを TUI で変更
+- **設定画面** — `-s` でテーマ・カラー・フォント・キーバインドを TUI で変更
 - **マルチプラットフォーム** — WSL / Linux / macOS に対応
 - **ファイルダウンロード** — Windows は `C:\Users\...\Downloads\` へ、Linux / macOS は `~/Downloads/` に保存
 - **セキュリティ** — アクセストークン認証、XSS・LFI 防止、セキュリティヘッダー付き
 - **もしかして？** — 不明なオプション入力時に近いコマンドを提案
+- **peak コマンド** — `peak` と打ち間違えたときにグラフアニメーションを表示（`sl` と同じ立場）
 
 ---
 
@@ -92,6 +95,8 @@ peek -m README.md       # macOS のデフォルトブラウザで開く
 peek -t README.md       # ターミナル内で Markdown をレンダリング
 peek -t notes.txt       # 行番号付きテキスト表示
 peek -t document.pdf    # pdftotext でテキスト抽出して表示
+peek -t photo.png       # chafa でターミナル内プレビュー
+peek -t data.csv        # テキスト表形式で表示
 ```
 
 **操作キー（デフォルト設定）:**
@@ -142,8 +147,13 @@ TUI の設定画面が起動します。保存すると `~/.config/peek/settings
 |----------|--------|
 | テーマ | Catppuccin Mocha（デフォルト）/ Latte / Nord / Gruvbox Dark / Tokyo Night / カスタム |
 | カスタムカラー | bg / surface / overlay / text / muted / accent を hex 指定 |
+| 本文フォント | システム標準 / Noto Sans JP / Inter / Georgia |
+| コードフォント | システム標準 / JetBrains Mono / Fira Code / Source Code Pro |
+| フォントサイズ | 小 (13px) / 中 (15px) / 大 (17px) |
 | 終了キー | Ctrl+Q / q / Escape / Vim（`:q` / `:q!`） |
 | 保存キー | Ctrl+S / F5 / Vim（`:w` / `:wq` / `:x`） |
+
+> Noto Sans JP・Inter・JetBrains Mono・Fira Code・Source Code Pro は Google Fonts から自動読み込みされます。
 
 ---
 
@@ -172,8 +182,25 @@ TUI の設定画面が起動します。保存すると `~/.config/peek/settings
 | `.md` `.markdown` | Markdown レンダリング（コードブロック・表・チェックリスト対応） | Markdown レンダリング |
 | `.txt` | 行番号付きプレーンテキスト | 行番号付きプレーンテキスト |
 | `.pdf` | ブラウザのネイティブ PDF ビューア | pdftotext でテキスト抽出（要 poppler-utils） |
+| `.png` `.jpg` `.jpeg` `.gif` `.webp` `.svg` | 画像を直接表示 | chafa でターミナルプレビュー（要 chafa） |
+| `.csv` `.tsv` | ソート可能なテーブル表示 | テキスト表形式 |
 
-> **PDF を TUI で表示したい場合:** `sudo apt install poppler-utils`（Linux / WSL）
+> **TUI で PDF を表示:** `sudo apt install poppler-utils`（Linux / WSL）/ `brew install poppler`（macOS）  
+> **TUI で画像を表示:** `sudo apt install chafa`（Linux / WSL）/ `brew install chafa`（macOS）
+
+---
+
+## peak コマンド
+
+`peek` を `peak` と打ち間違えると、折れ線グラフが左から右へ伸びて頂点（★）に達するアニメーションが表示されます。  
+`sl` と `ls` と同じ立場のコマンドです。
+
+```bash
+peak            # グラフアニメーションを表示
+peak -v         # バージョンを表示（peak --version も同様）
+```
+
+> 既に `peak` という別コマンドがインストールされている場合はスキップされます。
 
 ---
 
@@ -228,7 +255,9 @@ peek --update
 1. textual がターミナル上に直接レンダリング
 2. `.md` は Markdown ウィジェットでレンダリング、`.txt` は行番号付きスクロール表示
 3. `.pdf` は pdftotext でテキスト抽出して表示（未インストールの場合はブラウザ案内）
-4. `peek -s` で設定したテーマ・キーバインドを反映
+4. 画像は chafa でターミナルプレビュー（未インストールの場合はブラウザ案内）
+5. `.csv` / `.tsv` はデリミタを自動検出してテキスト表形式で表示
+6. `peek -s` で設定したテーマ・カラー・フォント・キーバインドを反映
 
 WSLg は不要です。
 
@@ -255,7 +284,7 @@ PDF 生成は [pandoc](https://pandoc.org/) が入っていれば優先的に使
 
 ```
 $ peek
-peek 1.13.x  —  ファイルビューア for WSL / Linux / macOS
+peek 1.18.x  —  ファイルビューア for WSL / Linux / macOS
 
   使い方: peek [オプション] <ファイル>
 
@@ -263,7 +292,7 @@ peek 1.13.x  —  ファイルビューア for WSL / Linux / macOS
     peek -t README.md       TUI で開く
     peek -t -e README.md    TUI エディタ（リアルタイムプレビュー）
     peek -e README.md       ブラウザライブエディタ
-    peek -s                 設定（テーマ・カラー・キーバインド）
+    peek -s                 設定（テーマ・カラー・フォント・キーバインド）
 
   詳細: peek --help-ja  /  peek --help-en
 ```
@@ -305,6 +334,15 @@ peek: README.md  [Windows]
 ```bash
 sudo apt install poppler-utils   # WSL / Linux
 brew install poppler             # macOS
+```
+
+**画像を TUI で表示したい**
+
+`chafa` が必要です。
+
+```bash
+sudo apt install chafa   # WSL / Linux
+brew install chafa       # macOS
 ```
 
 **ポートが毎回変わる**
