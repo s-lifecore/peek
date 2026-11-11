@@ -24,12 +24,16 @@ EOF
 
 chmod +x "$INSTALL_DIR/peek"
 
-# Install 'peak' alias unless a non-peek command already owns it
+# Install 'peak' script unless another command already owns it
 if command -v peak &>/dev/null && [[ "$(command -v peak)" != "$INSTALL_DIR/peak" ]]; then
   echo "peek: 'peak' コマンドが既に存在するためスキップしました: $(command -v peak)"
 else
-  ln -sf "$INSTALL_DIR/peek" "$INSTALL_DIR/peak"
-  echo "peek: 'peak' エイリアスもインストールしました。"
+  cat > "$INSTALL_DIR/peak" << EOF
+#!/bin/bash
+exec "$VENV_DIR/bin/python" "$SCRIPT_DIR/peek.py" --peak
+EOF
+  chmod +x "$INSTALL_DIR/peak"
+  echo "peek: 'peak' コマンドもインストールしました。"
 fi
 
 echo ""

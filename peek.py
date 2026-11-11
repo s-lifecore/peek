@@ -1848,6 +1848,93 @@ Screen  { background: #1e1e2e; align: center middle; }
     _404App().run()
 
 
+def _run_peak():
+    try:
+        from textual.app import App, ComposeResult
+        from textual.widgets import Static
+        from textual.binding import Binding
+        from textual.containers import Vertical
+    except ImportError:
+        print("\n   \\(^o^)/\n    /\\\n   /  \\\n  /    \\\n 探していたのは peek では？\n")
+        return
+
+    MOUNTAIN = [
+        "     /\\     ",
+        "    /  \\    ",
+        "   /    \\   ",
+        "  /      \\  ",
+        " /        \\ ",
+        "/──────────\\",
+    ]
+    CLIMBER = "  \\(^o^)/  "
+
+    STAGES = [
+        (1, False, 0, 0.35),
+        (2, False, 0, 0.28),
+        (3, False, 0, 0.25),
+        (4, False, 0, 0.25),
+        (5, False, 0, 0.25),
+        (6, False, 0, 0.35),
+        (6, True,  0, 0.55),
+        (6, True,  1, 0.55),
+        (6, True,  2, 2.0),
+    ]
+    MSG = [
+        "",
+        "探していたのは peek では？",
+        "peak ≠ peek",
+    ]
+
+    class _PeakApp(App):
+        CSS = """
+Screen { background: #1e1e2e; align: center middle; }
+#art   { text-align: center; color: #cdd6f4; }
+#msg   { text-align: center; color: #f9e2af; margin-top: 1; }
+#sub   { text-align: center; color: #6c7086; }
+#hint  { text-align: center; color: #313244; margin-top: 1; }
+"""
+        BINDINGS = [
+            Binding("q",      "quit", "", show=False),
+            Binding("escape", "quit", "", show=False),
+            Binding("space",  "quit", "", show=False),
+            Binding("enter",  "quit", "", show=False),
+        ]
+
+        def compose(self) -> ComposeResult:
+            with Vertical():
+                yield Static("", id="art")
+                yield Static("", id="msg")
+                yield Static("", id="sub")
+                yield Static("any key to exit", id="hint")
+
+        def on_mount(self) -> None:
+            self._stage = 0
+            self._next()
+
+        def _next(self) -> None:
+            if self._stage < len(STAGES):
+                self.set_timer(STAGES[self._stage][3], self._tick)
+            else:
+                self.set_timer(0.5, self.exit)
+
+        def _tick(self) -> None:
+            if self._stage >= len(STAGES):
+                self.exit()
+                return
+            n, show_climber, msg_level, _ = STAGES[self._stage]
+            art = ([CLIMBER] if show_climber else []) + MOUNTAIN[:n]
+            self.query_one("#art", Static).update("\n".join(art))
+            self.query_one("#msg", Static).update(MSG[msg_level] if msg_level >= 1 else "")
+            self.query_one("#sub", Static).update(MSG[2] if msg_level >= 2 else "")
+            self._stage += 1
+            self._next()
+
+        def on_key(self, event) -> None:
+            self.exit()
+
+    _PeakApp().run()
+
+
 def _do_update():
     script_dir = os.path.dirname(os.path.abspath(__file__))
     venv_pip = str(Path.home() / ".local" / "share" / "peek-venv" / "bin" / "pip")
@@ -1863,18 +1950,19 @@ def _do_update():
         print("peek: Updating dependencies...")
         subprocess.run([venv_pip, "install", "-r", req_file, "--quiet"])
 
-    # Install 'peak' symlink unless another command already owns it
+    # Install 'peak' script unless another command already owns it
     install_dir = Path.home() / ".local" / "bin"
-    peek_bin = install_dir / "peek"
+    venv_python = str(Path.home() / ".local" / "share" / "peek-venv" / "bin" / "python")
     peak_bin = install_dir / "peak"
-    if peek_bin.exists():
-        existing = subprocess.run(["which", "peak"], capture_output=True, text=True).stdout.strip()
-        if existing and existing != str(peak_bin):
-            print(f"peek: 'peak' コマンドが既に存在するためスキップ: {existing}")
-        else:
-            peak_bin.unlink(missing_ok=True)
-            peak_bin.symlink_to(peek_bin)
-            print("peek: 'peak' エイリアスをインストールしました。")
+    existing = subprocess.run(["which", "peak"], capture_output=True, text=True).stdout.strip()
+    if existing and existing != str(peak_bin):
+        print(f"peek: 'peak' コマンドが既に存在するためスキップ: {existing}")
+    else:
+        peak_bin.write_text(
+            f"#!/bin/bash\nexec {venv_python} {script_dir}/peek.py --peak\n"
+        )
+        peak_bin.chmod(0o755)
+        print("peek: 'peak' コマンドをインストールしました。")
 
     print("peek: Done! Run 'peek --version' to verify.")
 
@@ -1884,7 +1972,7 @@ _ALL_FLAGS = [
     '-w', '--windows', '-l', '--linux', '-m', '--mac',
     '-e', '--edit', '-s', '--settings',
     '--update', '--help-en', '--help-ja', '--version', '-v',
-    '--peek', '--matrix', '--aquarium', '--zen', '--404', '--catch',
+    '--peek', '--peak', '--matrix', '--aquarium', '--zen', '--404', '--catch',
 ]
 _SHORT_FLAGS = set('tblmwevs')
 
@@ -1934,6 +2022,10 @@ def main():
 
     if args[0] == "--peek":
         _run_easter_egg()
+        sys.exit(0)
+
+    if args[0] == "--peak":
+        _run_peak()
         sys.exit(0)
 
     if args[0] == "--matrix":
