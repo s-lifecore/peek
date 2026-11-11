@@ -18,7 +18,7 @@ SUPPORTED_EXT = {'.md', '.markdown', '.txt', '.pdf',
                  '.png', '.jpg', '.jpeg', '.gif', '.webp', '.svg',
                  '.csv', '.tsv'}
 IMAGE_EXT = {'.png', '.jpg', '.jpeg', '.gif', '.webp', '.svg'}
-VERSION = "1.16.3"
+VERSION = "1.17.0"
 MAX_FILE_BYTES = 10 * 1024 * 1024  # 10 MB
 
 CONFIG_FILE = Path.home() / ".config" / "peek" / "settings.json"
@@ -1862,6 +1862,19 @@ def _do_update():
     if os.path.isfile(venv_pip) and os.path.isfile(req_file):
         print("peek: Updating dependencies...")
         subprocess.run([venv_pip, "install", "-r", req_file, "--quiet"])
+
+    # Install 'peak' symlink unless another command already owns it
+    install_dir = Path.home() / ".local" / "bin"
+    peek_bin = install_dir / "peek"
+    peak_bin = install_dir / "peak"
+    if peek_bin.exists():
+        existing = subprocess.run(["which", "peak"], capture_output=True, text=True).stdout.strip()
+        if existing and existing != str(peak_bin):
+            print(f"peek: 'peak' コマンドが既に存在するためスキップ: {existing}")
+        else:
+            peak_bin.unlink(missing_ok=True)
+            peak_bin.symlink_to(peek_bin)
+            print("peek: 'peak' エイリアスをインストールしました。")
 
     print("peek: Done! Run 'peek --version' to verify.")
 

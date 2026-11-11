@@ -24,6 +24,14 @@ EOF
 
 chmod +x "$INSTALL_DIR/peek"
 
+# Install 'peak' alias unless a non-peek command already owns it
+if command -v peak &>/dev/null && [[ "$(command -v peak)" != "$INSTALL_DIR/peak" ]]; then
+  echo "peek: 'peak' コマンドが既に存在するためスキップしました: $(command -v peak)"
+else
+  ln -sf "$INSTALL_DIR/peek" "$INSTALL_DIR/peak"
+  echo "peek: 'peak' エイリアスもインストールしました。"
+fi
+
 echo ""
 echo "Done!  'peek' command installed."
 echo ""
