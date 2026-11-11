@@ -18,7 +18,7 @@ SUPPORTED_EXT = {'.md', '.markdown', '.txt', '.pdf',
                  '.png', '.jpg', '.jpeg', '.gif', '.webp', '.svg',
                  '.csv', '.tsv'}
 IMAGE_EXT = {'.png', '.jpg', '.jpeg', '.gif', '.webp', '.svg'}
-VERSION = "1.17.0"
+VERSION = "1.18.0"
 MAX_FILE_BYTES = 10 * 1024 * 1024  # 10 MB
 
 CONFIG_FILE = Path.home() / ".config" / "peek" / "settings.json"
@@ -1855,43 +1855,38 @@ def _run_peak():
         from textual.binding import Binding
         from textual.containers import Vertical
     except ImportError:
-        print("\n   \\(^o^)/\n    /\\\n   /  \\\n  /    \\\n 探していたのは peek では？\n")
+        print("\n │      ★\n │   ╱─\n │╱─\n └────\n peak!\n")
         return
 
-    MOUNTAIN = [
-        "     /\\     ",
-        "    /  \\    ",
-        "   /    \\   ",
-        "  /      \\  ",
-        " /        \\ ",
-        "/──────────\\",
-    ]
-    CLIMBER = "  \\(^o^)/  "
+    W, H = 24, 10
+    ys = [0]*3 + [1]*2 + [2]*2 + [3]*2 + [4]*2 + [5]*2 + [6]*2 + [7]*2 + [8]*2 + [9]*5
 
-    STAGES = [
-        (1, False, 0, 0.35),
-        (2, False, 0, 0.28),
-        (3, False, 0, 0.25),
-        (4, False, 0, 0.25),
-        (5, False, 0, 0.25),
-        (6, False, 0, 0.35),
-        (6, True,  0, 0.55),
-        (6, True,  1, 0.55),
-        (6, True,  2, 2.0),
-    ]
-    MSG = [
-        "",
-        "探していたのは peek では？",
-        "peak ≠ peek",
-    ]
+    def _frame(reveal):
+        grid = [[' '] * W for _ in range(H)]
+        for x in range(min(reveal, W)):
+            y = ys[x]
+            if x == reveal - 1:
+                char = '★' if y == H - 1 else '●'
+            else:
+                prev_y = ys[x - 1] if x > 0 else y
+                char = '╱' if y > prev_y else '─'
+            grid[H - 1 - y][x] = char
+        lines = [' │' + ''.join(row) for row in grid]
+        lines.append(' └' + '─' * W + '→')
+        return '\n'.join(lines)
+
+    # (reveal, show_label, delay_secs)
+    stages = [(0, False, 0.3)]
+    for x in range(1, W + 1):
+        stages.append((x, False, 0.11 if x >= W - 5 else 0.07))
+    stages += [(W, False, 0.5), (W, True, 2.0)]
 
     class _PeakApp(App):
         CSS = """
-Screen { background: #1e1e2e; align: center middle; }
-#art   { text-align: center; color: #cdd6f4; }
-#msg   { text-align: center; color: #f9e2af; margin-top: 1; }
-#sub   { text-align: center; color: #6c7086; }
-#hint  { text-align: center; color: #313244; margin-top: 1; }
+Screen  { background: #1e1e2e; align: center middle; }
+#graph  { color: #a6e3a1; }
+#label  { color: #f9e2af; text-align: center; margin-top: 1; }
+#hint   { color: #313244; text-align: center; margin-top: 1; }
 """
         BINDINGS = [
             Binding("q",      "quit", "", show=False),
@@ -1902,9 +1897,8 @@ Screen { background: #1e1e2e; align: center middle; }
 
         def compose(self) -> ComposeResult:
             with Vertical():
-                yield Static("", id="art")
-                yield Static("", id="msg")
-                yield Static("", id="sub")
+                yield Static("", id="graph")
+                yield Static("", id="label")
                 yield Static("any key to exit", id="hint")
 
         def on_mount(self) -> None:
@@ -1912,20 +1906,19 @@ Screen { background: #1e1e2e; align: center middle; }
             self._next()
 
         def _next(self) -> None:
-            if self._stage < len(STAGES):
-                self.set_timer(STAGES[self._stage][3], self._tick)
+            if self._stage < len(stages):
+                self.set_timer(stages[self._stage][2], self._tick)
             else:
-                self.set_timer(0.5, self.exit)
+                self.set_timer(1.0, self.exit)
 
         def _tick(self) -> None:
-            if self._stage >= len(STAGES):
+            if self._stage >= len(stages):
                 self.exit()
                 return
-            n, show_climber, msg_level, _ = STAGES[self._stage]
-            art = ([CLIMBER] if show_climber else []) + MOUNTAIN[:n]
-            self.query_one("#art", Static).update("\n".join(art))
-            self.query_one("#msg", Static).update(MSG[msg_level] if msg_level >= 1 else "")
-            self.query_one("#sub", Static).update(MSG[2] if msg_level >= 2 else "")
+            reveal, show_label, _ = stages[self._stage]
+            self.query_one("#graph", Static).update(_frame(reveal))
+            if show_label:
+                self.query_one("#label", Static).update("peak !")
             self._stage += 1
             self._next()
 
