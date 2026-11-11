@@ -30,6 +30,9 @@ if command -v peak &>/dev/null && [[ "$(command -v peak)" != "$INSTALL_DIR/peak"
 else
   cat > "$INSTALL_DIR/peak" << EOF
 #!/bin/bash
+if [[ "\$1" == "-v" || "\$1" == "--version" ]]; then
+  exec "$VENV_DIR/bin/python" "$SCRIPT_DIR/peek.py" --version
+fi
 exec "$VENV_DIR/bin/python" "$SCRIPT_DIR/peek.py" --peak
 EOF
   chmod +x "$INSTALL_DIR/peak"

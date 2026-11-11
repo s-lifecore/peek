@@ -1952,7 +1952,11 @@ def _do_update():
         print(f"peek: 'peak' コマンドが既に存在するためスキップ: {existing}")
     else:
         peak_bin.write_text(
-            f"#!/bin/bash\nexec {venv_python} {script_dir}/peek.py --peak\n"
+            f'#!/bin/bash\n'
+            f'if [[ "$1" == "-v" || "$1" == "--version" ]]; then\n'
+            f'  exec {venv_python} {script_dir}/peek.py --version\n'
+            f'fi\n'
+            f'exec {venv_python} {script_dir}/peek.py --peak\n'
         )
         peak_bin.chmod(0o755)
         print("peek: 'peak' コマンドをインストールしました。")
