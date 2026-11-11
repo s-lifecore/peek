@@ -14,7 +14,10 @@ import socket
 import difflib
 from pathlib import Path
 
-SUPPORTED_EXT = {'.md', '.markdown', '.txt', '.pdf'}
+SUPPORTED_EXT = {'.md', '.markdown', '.txt', '.pdf',
+                 '.png', '.jpg', '.jpeg', '.gif', '.webp', '.svg',
+                 '.csv', '.tsv'}
+IMAGE_EXT = {'.png', '.jpg', '.jpeg', '.gif', '.webp', '.svg'}
 VERSION = "1.16.3"
 MAX_FILE_BYTES = 10 * 1024 * 1024  # 10 MB
 
@@ -28,6 +31,27 @@ DEFAULT_SETTINGS = {
     },
     "quit_key": "ctrl+q",
     "save_key": "ctrl+s",
+    "font_body": "system",
+    "font_code": "system",
+    "font_size": "medium",
+}
+
+FONT_BODY_MAP = {
+    "system":  ('-apple-system, BlinkMacSystemFont, "Segoe UI", "Hiragino Sans", "Yu Gothic UI", sans-serif', None),
+    "noto":    ('"Noto Sans JP", "Noto Sans", sans-serif', "Noto+Sans+JP:wght@400;600;700"),
+    "inter":   ('"Inter", sans-serif', "Inter:ital,wght@0,400;0,600;0,700;1,400"),
+    "georgia": ('Georgia, "Times New Roman", serif', None),
+}
+FONT_CODE_MAP = {
+    "system":        ('"Consolas", "JetBrains Mono", "Fira Code", monospace', None),
+    "jetbrains":     ('"JetBrains Mono", monospace', "JetBrains+Mono:wght@400;700"),
+    "fira":          ('"Fira Code", monospace', "Fira+Code:wght@400;700"),
+    "sourcecodepro": ('"Source Code Pro", monospace', "Source+Code+Pro:wght@400;700"),
+}
+FONT_SIZE_MAP = {
+    "small":  "13px",
+    "medium": "15px",
+    "large":  "17px",
 }
 
 THEMES = {
@@ -75,6 +99,9 @@ SUPPORTED FILE TYPES:
   .md / .markdown       Rendered Markdown with syntax highlighting
   .txt                  Plain text with line numbers
   .pdf                  Browser: native viewer / TUI: text via pdftotext
+  .png / .jpg / .jpeg   Images displayed in browser / TUI: chafa preview (optional)
+  .gif / .webp / .svg   Images displayed in browser / TUI: chafa preview (optional)
+  .csv / .tsv           Tabular data rendered as sortable table
 
 EXAMPLES:
   peek README.md             # browser (default, platform auto-detected)
@@ -113,6 +140,9 @@ HELP_JA = """peek {version} - WSL / Linux / macOS ターミナル用 GUI ファ�
   .md / .markdown        シンタックスハイライト付き Markdown レンダリング
   .txt                   行番号付きプレーンテキスト表示
   .pdf                   ブラウザ: ネイティブビューア / TUI: pdftotext でテキスト抽出
+  .png / .jpg / .jpeg    ブラウザで画像表示 / TUI: chafa でプレビュー（要インストール）
+  .gif / .webp / .svg    ブラウザで画像表示 / TUI: chafa でプレビュー（要インストール）
+  .csv / .tsv            ブラウザ: ソート対応テーブル表示 / TUI: テキスト表形式
 
 使用例:
   peek README.md             # ブラウザで開く（デフォルト・OS 自動検出）
@@ -372,6 +402,18 @@ def create_app(target_file, access_token, platform="windows", edit_mode=False):
     _win_downloads = _windows_downloads_path() if platform == "windows" else None
     _save_default = _default_save_display(platform, _win_downloads, Path(target_file).name)
 
+    _settings = _load_settings()
+    _font_body_css, _font_body_gf = FONT_BODY_MAP.get(_settings.get("font_body", "system"), FONT_BODY_MAP["system"])
+    _font_code_css, _font_code_gf = FONT_CODE_MAP.get(_settings.get("font_code", "system"), FONT_CODE_MAP["system"])
+    _font_size_css = FONT_SIZE_MAP.get(_settings.get("font_size", "medium"), "15px")
+    _gf_list = [gf for gf in [_font_body_gf, _font_code_gf] if gf]
+    _google_fonts_url = (
+        "https://fonts.googleapis.com/css2?" +
+        "&".join(f"family={f}" for f in _gf_list) +
+        "&display=swap"
+    ) if _gf_list else None
+    _tc = _get_theme_colors(_settings)
+
     template_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "templates")
     app = Flask(__name__, template_folder=template_dir)
     app.config["MAX_CONTENT_LENGTH"] = MAX_FILE_BYTES
@@ -407,6 +449,32 @@ def create_app(target_file, access_token, platform="windows", edit_mode=False):
         if path.stat().st_size > MAX_FILE_BYTES:
             abort(413)
 
+    def _parse_csv(path):
+        import csv
+        ext = path.suffix.lower()
+        delimiter = '\t' if ext == '.tsv' else ','
+        all_rows = []
+        try:
+            with open(str(path), encoding='utf-8', errors='replace', newline='') as f:
+                if ext == '.csv':
+                    sample = f.read(4096)
+                    f.seek(0)
+                    try:
+                        dialect = csv.Sniffer().sniff(sample, delimiters=',;\t|')
+                        delimiter = dialect.delimiter
+                    except csv.Error:
+                        pass
+                all_rows = list(csv.reader(f, delimiter=delimiter))
+        except Exception:
+            return [], [], 0
+        if not all_rows:
+            return [], [], 0
+        headers = all_rows[0]
+        rows = all_rows[1:]
+        total = len(rows)
+        padded = [r + [''] * max(0, len(headers) - len(r)) for r in rows[:1000]]
+        return headers, padded, total
+
     def _render_md(path):
         content = path.read_text(encoding="utf-8")
         raw_html = markdown2.markdown(
@@ -424,7 +492,13 @@ def create_app(target_file, access_token, platform="windows", edit_mode=False):
         _check_size(path)
 
         common = dict(filename=path.name, platform=platform, edit_mode=edit_mode,
-                      default_save_path=_save_default)
+                      default_save_path=_save_default,
+                      font_body=_font_body_css, font_code=_font_code_css,
+                      font_size=_font_size_css, google_fonts_url=_google_fonts_url,
+                      theme_bg=_tc["bg"], theme_surface=_tc["surface"],
+                      theme_overlay=_tc.get("overlay", "#313244"),
+                      theme_text=_tc["text"], theme_muted=_tc["muted"],
+                      theme_accent=_tc["accent"])
 
         if ext == ".pdf":
             return render_template("view.html", file_type="pdf", content="", **common)
@@ -434,6 +508,13 @@ def create_app(target_file, access_token, platform="windows", edit_mode=False):
         elif ext == ".txt":
             content = path.read_text(encoding="utf-8")
             return render_template("view.html", file_type="text", content=content, **common)
+        elif ext in IMAGE_EXT:
+            return render_template("view.html", file_type="image", content="", **common)
+        elif ext in (".csv", ".tsv"):
+            headers, rows, row_count = _parse_csv(path)
+            return render_template("view.html", file_type="csv", content="",
+                                   csv_headers=headers, csv_rows=rows,
+                                   csv_row_count=row_count, **common)
         else:
             abort(415)
 
@@ -516,7 +597,7 @@ def create_app(target_file, access_token, platform="windows", edit_mode=False):
                         "path": dest, "platform": platform})
 
     # Extensions allowed as save-as destinations (edit targets only, not .pdf)
-    _SAVEABLE_EXT = {'.md', '.markdown', '.txt'}
+    _SAVEABLE_EXT = {'.md', '.markdown', '.txt', '.csv', '.tsv'}
 
     @app.route("/save-as", methods=["POST"])
     def save_as():
@@ -580,6 +661,7 @@ def _run_tui(target_file, edit_mode=False):
 
     file_type = 'text'
     content = ''
+    _chafa_content = None
 
     if ext in ('.md', '.markdown'):
         content = path.read_text(encoding='utf-8')
@@ -599,6 +681,20 @@ def _run_tui(target_file, edit_mode=False):
                 file_type = 'text'
         except (FileNotFoundError, subprocess.TimeoutExpired):
             pass
+    elif ext in IMAGE_EXT:
+        file_type = 'image'
+        try:
+            r = subprocess.run(
+                ['chafa', '--size', '60x28', target_file],
+                capture_output=True, text=True, timeout=10,
+            )
+            if r.returncode == 0 and r.stdout.strip():
+                _chafa_content = r.stdout
+        except (FileNotFoundError, subprocess.TimeoutExpired):
+            pass
+    elif ext in ('.csv', '.tsv'):
+        file_type = 'csv'
+        content, _csv_total = _format_csv_tui(path)
 
     # Load user settings
     settings = _load_settings()
@@ -624,6 +720,9 @@ def _run_tui(target_file, edit_mode=False):
     if edit_mode:
         if file_type == 'pdf':
             print("peek: PDF ファイルは TUI 編集モードに対応していません。")
+            sys.exit(1)
+        if file_type == 'image':
+            print("peek: 画像ファイルは編集モードに対応していません。")
             sys.exit(1)
 
         from rich.markdown import Markdown as RichMarkdown
@@ -745,6 +844,9 @@ def _run_tui(target_file, edit_mode=False):
             f"VerticalScroll{{ height: 1fr; background: {bg}; }}\n"
             f"#txt          {{ color: {text_c}; padding: 1 2; }}\n"
             f"#pdf-info     {{ color: #f9e2af; padding: 2 4; }}\n"
+        f"#img-preview  {{ color: {text_c}; padding: 1 2; }}\n"
+        f"#img-info     {{ color: #f9e2af; padding: 2 4; }}\n"
+        f"#csv-txt      {{ color: {text_c}; padding: 1 2; }}\n"
             + cmd_css
         )
         BINDINGS = view_bindings
@@ -764,6 +866,26 @@ def _run_tui(target_file, edit_mode=False):
                 )
                 with VerticalScroll():
                     yield Static(numbered, id='txt')
+            elif file_type == 'image':
+                if _chafa_content:
+                    with VerticalScroll():
+                        yield Static(_chafa_content, id='img-preview')
+                else:
+                    file_sz = path.stat().st_size
+                    yield Static(
+                        f"画像: {path.name}  ({file_sz:,} bytes)\n\n"
+                        "TUI では画像を直接表示できません。\n\n"
+                        "ブラウザで開くには:\n"
+                        f"  peek -w {path.name}   (Windows)\n"
+                        f"  peek -l {path.name}   (Linux)\n"
+                        f"  peek -m {path.name}   (macOS)\n\n"
+                        "chafa をインストールすると TUI でプレビューできます:\n"
+                        "  sudo apt install chafa",
+                        id='img-info',
+                    )
+            elif file_type == 'csv':
+                with VerticalScroll():
+                    yield Static(content, id='csv-txt')
             else:
                 yield Static(
                     f"PDF: {path.name}\n\n"
@@ -823,6 +945,48 @@ def _run_tui(target_file, edit_mode=False):
                 self.exit()
 
     PeekApp().run()
+
+
+def _format_csv_tui(path, max_rows=200):
+    import csv as _csv_mod
+    ext = path.suffix.lower()
+    delimiter = '\t' if ext == '.tsv' else ','
+    all_rows = []
+    try:
+        with open(str(path), encoding='utf-8', errors='replace', newline='') as f:
+            if ext == '.csv':
+                sample = f.read(4096)
+                f.seek(0)
+                try:
+                    dialect = _csv_mod.Sniffer().sniff(sample, delimiters=',;\t|')
+                    delimiter = dialect.delimiter
+                except _csv_mod.Error:
+                    pass
+            all_rows = list(_csv_mod.reader(f, delimiter=delimiter))
+    except Exception:
+        return "（読み込みエラー）", 0
+    if not all_rows:
+        return "（データなし）", 0
+    total_data = len(all_rows) - 1
+    display = all_rows[:max_rows + 1]
+    col_count = max((len(r) for r in display), default=0)
+    col_widths = [0] * col_count
+    for row in display:
+        for i, cell in enumerate(row[:col_count]):
+            col_widths[i] = max(col_widths[i], min(len(str(cell)), 20))
+    lines = []
+    for idx, row in enumerate(display):
+        cells = []
+        for i in range(col_count):
+            cell = str(row[i]) if i < len(row) else ""
+            cell = (cell[:17] + "...") if len(cell) > 20 else cell
+            cells.append(cell.ljust(col_widths[i]))
+        lines.append("  ".join(cells).rstrip())
+        if idx == 0:
+            lines.append("─" * min(sum(col_widths) + 2 * max(col_count - 1, 0), 200))
+    if total_data > max_rows:
+        lines.append(f"\n... 全 {total_data} 行中 {max_rows} 行を表示")
+    return "\n".join(lines), total_data
 
 
 def _load_settings():
@@ -888,10 +1052,31 @@ def _run_settings():
         ("Vim (:w / :wq)",  "vim"),
     ]
 
-    cur_theme  = settings.get("theme", "catppuccin-mocha")
-    cur_colors = settings.get("custom_colors", DEFAULT_SETTINGS["custom_colors"])
-    cur_quit   = settings.get("quit_key", "ctrl+q")
-    cur_save   = settings.get("save_key", "ctrl+s")
+    cur_theme     = settings.get("theme", "catppuccin-mocha")
+    cur_colors    = settings.get("custom_colors", DEFAULT_SETTINGS["custom_colors"])
+    cur_quit      = settings.get("quit_key", "ctrl+q")
+    cur_save      = settings.get("save_key", "ctrl+s")
+    cur_font_body = settings.get("font_body", "system")
+    cur_font_code = settings.get("font_code", "system")
+    cur_font_size = settings.get("font_size", "medium")
+
+    FONT_BODY_OPTIONS = [
+        ("システムデフォルト",           "system"),
+        ("Noto Sans JP (Google Fonts)", "noto"),
+        ("Inter (Google Fonts)",        "inter"),
+        ("Georgia（セリフ）",            "georgia"),
+    ]
+    FONT_CODE_OPTIONS = [
+        ("システムデフォルト (Consolas / JetBrains)", "system"),
+        ("JetBrains Mono (Google Fonts)",            "jetbrains"),
+        ("Fira Code + リガチャ (Google Fonts)",       "fira"),
+        ("Source Code Pro (Google Fonts)",           "sourcecodepro"),
+    ]
+    FONT_SIZE_OPTIONS = [
+        ("中 — 15px（デフォルト）", "medium"),
+        ("小 — 13px",             "small"),
+        ("大 — 17px",             "large"),
+    ]
 
     COLOR_FIELDS = [
         ("bg",      "背景:"),
@@ -914,6 +1099,7 @@ VerticalScroll   { height: 1fr; padding: 1 3; }
 .row             { height: 3; align: left middle; }
 .lbl             { width: 18; color: #a6adc8; }
 Select           { width: 38; }
+.sel-wide        { width: 48; }
 Input            { width: 24; background: #313244; color: #cdd6f4; border: tall #313244; }
 Input:focus      { border: tall #89b4fa; }
 #custom-block    { display: none; padding: 0 2; }
@@ -953,6 +1139,18 @@ Button           { margin-right: 2; }
                     yield Label("保存キー:", classes="lbl")
                     yield Select(SAVE_OPTIONS, value=cur_save, id="sel-save")
 
+                yield Label("── フォント（ブラウザモード） ───────────────────────────", classes="section")
+                with Horizontal(classes="row"):
+                    yield Label("本文フォント:", classes="lbl")
+                    yield Select(FONT_BODY_OPTIONS, value=cur_font_body, id="sel-font-body")
+                with Horizontal(classes="row"):
+                    yield Label("コードフォント:", classes="lbl")
+                    yield Select(FONT_CODE_OPTIONS, value=cur_font_code, id="sel-font-code",
+                                 classes="sel-wide")
+                with Horizontal(classes="row"):
+                    yield Label("フォントサイズ:", classes="lbl")
+                    yield Select(FONT_SIZE_OPTIONS, value=cur_font_size, id="sel-font-size")
+
                 with Horizontal(classes="btn-row"):
                     yield Button("保存して閉じる", id="btn-save",   variant="primary")
                     yield Button("リセット",       id="btn-reset")
@@ -987,9 +1185,12 @@ Button           { margin-right: 2; }
 
         def _reset(self) -> None:
             try:
-                self.query_one("#sel-theme", Select).value = "catppuccin-mocha"
-                self.query_one("#sel-quit",  Select).value = "ctrl+q"
-                self.query_one("#sel-save",  Select).value = "ctrl+s"
+                self.query_one("#sel-theme",     Select).value = "catppuccin-mocha"
+                self.query_one("#sel-quit",      Select).value = "ctrl+q"
+                self.query_one("#sel-save",      Select).value = "ctrl+s"
+                self.query_one("#sel-font-body", Select).value = "system"
+                self.query_one("#sel-font-code", Select).value = "system"
+                self.query_one("#sel-font-size", Select).value = "medium"
                 c = THEMES["catppuccin-mocha"]
                 for cid, _ in COLOR_FIELDS:
                     self.query_one(f"#col-{cid}", Input).value = c.get(cid, "")
@@ -1000,9 +1201,12 @@ Button           { margin-right: 2; }
 
         def _save(self) -> None:
             try:
-                theme    = str(self.query_one("#sel-theme", Select).value or "catppuccin-mocha")
-                quit_key = str(self.query_one("#sel-quit",  Select).value or "ctrl+q")
-                save_key = str(self.query_one("#sel-save",  Select).value or "ctrl+s")
+                theme     = str(self.query_one("#sel-theme",     Select).value or "catppuccin-mocha")
+                quit_key  = str(self.query_one("#sel-quit",      Select).value or "ctrl+q")
+                save_key  = str(self.query_one("#sel-save",      Select).value or "ctrl+s")
+                font_body = str(self.query_one("#sel-font-body", Select).value or "system")
+                font_code = str(self.query_one("#sel-font-code", Select).value or "system")
+                font_size = str(self.query_one("#sel-font-size", Select).value or "medium")
             except Exception:
                 self.notify("設定の読み取りに失敗しました", severity="error")
                 return
@@ -1016,7 +1220,9 @@ Button           { margin-right: 2; }
                     pass
                 custom[cid] = raw if (raw.startswith("#") and len(raw) in (4, 7)) else dflt
             _save_settings({"theme": theme, "custom_colors": custom,
-                            "quit_key": quit_key, "save_key": save_key})
+                            "quit_key": quit_key, "save_key": save_key,
+                            "font_body": font_body, "font_code": font_code,
+                            "font_size": font_size})
             self.notify("設定を保存しました")
             self.call_after_refresh(self.exit)
 
@@ -1804,6 +2010,10 @@ def main():
     if ext not in SUPPORTED_EXT:
         print(f"peek: Unsupported file type '{ext}'")
         print(f"      Supported: {', '.join(sorted(SUPPORTED_EXT))}")
+        sys.exit(1)
+
+    if edit_mode and ext in IMAGE_EXT:
+        print("peek: 画像ファイルは編集モードに対応していません。")
         sys.exit(1)
 
     if tui_mode:

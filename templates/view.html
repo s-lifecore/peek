@@ -11,24 +11,34 @@
   <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
   {% endif %}
 
+  {% if google_fonts_url %}
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="{{ google_fonts_url }}" rel="stylesheet">
+  {% endif %}
+
   <style>
     :root {
-      --bg:       #1e1e2e;
-      --surface:  #181825;
-      --overlay:  #313244;
-      --text:     #cdd6f4;
-      --subtext:  #a6adc8;
-      --muted:    #6c7086;
-      --blue:     #89b4fa;
+      --bg:       {{ theme_bg }};
+      --surface:  {{ theme_surface }};
+      --overlay:  {{ theme_overlay }};
+      --text:     {{ theme_text }};
+      --subtext:  color-mix(in srgb, {{ theme_text }} 60%, {{ theme_muted }});
+      --muted:    {{ theme_muted }};
+      --blue:     {{ theme_accent }};
       --green:    #a6e3a1;
       --yellow:   #f9e2af;
       --red:      #f38ba8;
       --mauve:    #cba6f7;
-      --border:   #313244;
+      --border:   {{ theme_overlay }};
 
       --accent-md:  var(--blue);
       --accent-txt: var(--green);
       --accent-pdf: var(--red);
+
+      --font-body: {{ font_body | safe }};
+      --font-code: {{ font_code | safe }};
+      --font-size: {{ font_size }};
     }
 
     *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
@@ -36,7 +46,7 @@
     html { scroll-behavior: smooth; }
 
     body {
-      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Hiragino Sans", "Yu Gothic UI", sans-serif;
+      font-family: var(--font-body);
       background: var(--bg);
       color: var(--text);
       height: 100vh;
@@ -53,6 +63,8 @@
     .accent-bar.md  { background: var(--accent-md); }
     .accent-bar.txt { background: var(--accent-txt); }
     .accent-bar.pdf { background: var(--accent-pdf); }
+    .accent-bar.img { background: var(--mauve); }
+    .accent-bar.csv { background: var(--yellow); }
 
     /* ───── Header ───── */
     header {
@@ -85,6 +97,8 @@
     .badge-md  { background: var(--accent-md);  color: var(--surface); }
     .badge-txt { background: var(--accent-txt); color: var(--surface); }
     .badge-pdf { background: var(--accent-pdf); color: var(--surface); }
+    .badge-img { background: var(--mauve);      color: var(--surface); }
+    .badge-csv { background: var(--yellow);     color: var(--surface); }
 
     /* Header right: buttons */
     .header-right { margin-left: auto; display: flex; align-items: center; gap: 8px; }
@@ -178,7 +192,7 @@
       margin: 0 auto;
       padding: 40px 28px 72px;
       line-height: 1.8;
-      font-size: 15px;
+      font-size: var(--font-size);
     }
 
     .markdown-body h1,
@@ -229,7 +243,7 @@
       background: var(--overlay);
       padding: 0.15em 0.45em;
       border-radius: 4px;
-      font-family: "Consolas", "JetBrains Mono", "Fira Code", monospace;
+      font-family: var(--font-code);
       font-size: 0.875em;
       color: var(--green);
     }
@@ -247,7 +261,7 @@
     .markdown-body pre > code.hljs {
       background: #21212e !important;
       padding: 18px 20px !important;
-      font-family: "Consolas", "JetBrains Mono", "Fira Code", monospace;
+      font-family: var(--font-code);
       font-size: 0.875em;
       line-height: 1.65;
       border-radius: 0;
@@ -307,8 +321,8 @@
     .text-table {
       width: 100%;
       border-collapse: collapse;
-      font-family: "Consolas", "JetBrains Mono", "Fira Code", monospace;
-      font-size: 13.5px;
+      font-family: var(--font-code);
+      font-size: var(--font-size);
       line-height: 1.65;
     }
 
@@ -341,6 +355,86 @@
       font-family: "Consolas", "JetBrains Mono", monospace;
       font-size: 12px;
       border-bottom: 1px solid var(--border);
+    }
+
+    /* ───── Image ───── */
+    .image-view {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: flex-start;
+      padding: 40px 20px 60px;
+      min-height: 100%;
+    }
+    .image-preview {
+      max-width: min(900px, 100%);
+      max-height: 80vh;
+      object-fit: contain;
+      border-radius: 8px;
+      box-shadow: 0 4px 32px rgba(0,0,0,0.5);
+    }
+    .image-caption {
+      margin-top: 12px;
+      color: var(--muted);
+      font-size: 12px;
+      letter-spacing: 0.03em;
+    }
+
+    /* ───── CSV ───── */
+    .csv-info {
+      padding: 10px 20px;
+      font-size: 12px;
+      color: var(--muted);
+      border-bottom: 1px solid var(--border);
+      flex-shrink: 0;
+    }
+    .csv-scroll {
+      flex: 1;
+      overflow: auto;
+      min-height: 0;
+    }
+    .csv-scroll::-webkit-scrollbar { width: 8px; height: 8px; }
+    .csv-scroll::-webkit-scrollbar-track { background: var(--surface); }
+    .csv-scroll::-webkit-scrollbar-thumb { background: var(--overlay); border-radius: 4px; }
+    .csv-scroll::-webkit-scrollbar-corner { background: var(--surface); }
+    .csv-table {
+      border-collapse: collapse;
+      font-family: var(--font-code);
+      font-size: 13px;
+      white-space: nowrap;
+      min-width: 100%;
+    }
+    .csv-table thead th {
+      position: sticky;
+      top: 0;
+      background: var(--overlay);
+      color: var(--blue);
+      font-weight: 600;
+      padding: 9px 16px;
+      border: 1px solid var(--border);
+      cursor: pointer;
+      user-select: none;
+      text-align: left;
+    }
+    .csv-table thead th:hover { background: var(--border); }
+    .sort-icon { margin-left: 5px; opacity: 0.35; font-size: 10px; }
+    .csv-table th.sort-asc  .sort-icon::after { content: ' ↑'; opacity: 1; }
+    .csv-table th.sort-desc .sort-icon::after { content: ' ↓'; opacity: 1; }
+    .csv-table td {
+      padding: 7px 16px;
+      border: 1px solid var(--border);
+      color: var(--text);
+      max-width: 320px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .csv-table tbody tr:nth-child(even) { background: rgba(255,255,255,0.025); }
+    .csv-table tbody tr:hover { background: rgba(255,255,255,0.055); }
+    .csv-container {
+      display: flex;
+      flex-direction: column;
+      flex: 1;
+      min-height: 0;
     }
 
     /* ───── PDF ───── */
@@ -377,8 +471,8 @@
       outline: none;
       background: var(--bg);
       color: var(--text);
-      font-family: "Consolas", "JetBrains Mono", "Fira Code", monospace;
-      font-size: 14px;
+      font-family: var(--font-code);
+      font-size: var(--font-size);
       line-height: 1.65;
       padding: 24px 28px;
       tab-size: 4;
@@ -446,7 +540,7 @@
       border: 1px solid var(--border);
       border-radius: 6px;
       color: var(--text);
-      font-family: "Consolas", "JetBrains Mono", monospace;
+      font-family: var(--font-code);
       font-size: 12.5px;
       outline: none;
     }
@@ -469,6 +563,8 @@
     {%- if file_type == 'markdown' %} md
     {%- elif file_type == 'text' %} txt
     {%- elif file_type == 'pdf' %} pdf
+    {%- elif file_type == 'image' %} img
+    {%- elif file_type == 'csv' %} csv
     {%- endif %}"></div>
 
   <header>
@@ -479,6 +575,10 @@
       <span class="badge badge-txt">TXT</span>
     {% elif file_type == 'pdf' %}
       <span class="badge badge-pdf">PDF</span>
+    {% elif file_type == 'image' %}
+      <span class="badge badge-img">IMG</span>
+    {% elif file_type == 'csv' %}
+      <span class="badge badge-csv">CSV</span>
     {% endif %}
 
     {% if edit_mode %}<span class="unsaved-dot" id="unsaved-dot"></span>{% endif %}
@@ -530,7 +630,7 @@
     </div>
   </div>
 
-  {% if edit_mode and file_type != 'pdf' %}
+  {% if edit_mode and file_type not in ('pdf', 'image') %}
 
   <div class="editor-layout">
     <div class="editor-pane" id="editor-pane">
@@ -559,6 +659,36 @@
       <div class="text-header">{{ filename }}</div>
       <pre class="text-body" style="display:none">{{ content }}</pre>
       <table class="text-table" id="text-table"></table>
+
+    {% elif file_type == 'image' %}
+      <div class="image-view">
+        <img src="/raw" alt="{{ filename }}" class="image-preview">
+        <div class="image-caption">{{ filename }}</div>
+      </div>
+
+    {% elif file_type == 'csv' %}
+      <div class="csv-container">
+        <div class="csv-info">
+          {{ csv_row_count }} 行 · {{ csv_headers | length }} 列
+          {% if csv_row_count > 1000 %} &nbsp;（先頭 1,000 行を表示）{% endif %}
+        </div>
+        <div class="csv-scroll">
+          <table class="csv-table" id="csv-table">
+            <thead>
+              <tr>
+                {% for h in csv_headers %}
+                <th data-col="{{ loop.index0 }}">{{ h }}<span class="sort-icon"></span></th>
+                {% endfor %}
+              </tr>
+            </thead>
+            <tbody>
+              {% for row in csv_rows %}
+              <tr>{% for cell in row %}<td>{{ cell }}</td>{% endfor %}</tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      </div>
 
     {% endif %}
 
@@ -816,7 +946,7 @@
   </script>
   {% endif %}
 
-  {% if edit_mode and file_type != 'pdf' %}
+  {% if edit_mode and file_type not in ('pdf', 'image') %}
   <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/dompurify@3/dist/purify.min.js"></script>
   <script>
@@ -948,6 +1078,34 @@
       document.body.style.userSelect = '';
     });
     {% endif %}
+  </script>
+  {% endif %}
+
+  {% if file_type == 'csv' %}
+  <script>
+    (function() {
+      const table = document.getElementById('csv-table');
+      if (!table) return;
+      const tbody = table.querySelector('tbody');
+      let sortCol = -1, sortAsc = true;
+      table.querySelectorAll('thead th').forEach((th, col) => {
+        th.addEventListener('click', () => {
+          if (sortCol === col) sortAsc = !sortAsc;
+          else { sortCol = col; sortAsc = true; }
+          table.querySelectorAll('thead th').forEach(h => h.classList.remove('sort-asc', 'sort-desc'));
+          th.classList.add(sortAsc ? 'sort-asc' : 'sort-desc');
+          const rows = Array.from(tbody.querySelectorAll('tr'));
+          rows.sort((a, b) => {
+            const av = a.cells[col]?.textContent?.trim() ?? '';
+            const bv = b.cells[col]?.textContent?.trim() ?? '';
+            const an = parseFloat(av), bn = parseFloat(bv);
+            if (!isNaN(an) && !isNaN(bn)) return sortAsc ? an - bn : bn - an;
+            return sortAsc ? av.localeCompare(bv, 'ja') : bv.localeCompare(av, 'ja');
+          });
+          rows.forEach(r => tbody.appendChild(r));
+        });
+      });
+    })();
   </script>
   {% endif %}
 
