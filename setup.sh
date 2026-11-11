@@ -25,9 +25,12 @@ EOF
 chmod +x "$INSTALL_DIR/peek"
 
 # Install 'peak' script unless another command already owns it
-if command -v peak &>/dev/null && [[ "$(command -v peak)" != "$INSTALL_DIR/peak" ]]; then
-  echo "peek: 'peak' コマンドが既に存在するためスキップしました: $(command -v peak)"
+EXISTING_PEAK="$(command -v peak 2>/dev/null || true)"
+if [[ -n "$EXISTING_PEAK" && "$EXISTING_PEAK" != "$INSTALL_DIR/peak" ]]; then
+  echo "peek: 'peak' コマンドが既に存在するためスキップしました: $EXISTING_PEAK"
 else
+  # Remove any existing symlink before writing (avoid overwriting symlink target)
+  rm -f "$INSTALL_DIR/peak"
   cat > "$INSTALL_DIR/peak" << EOF
 #!/bin/bash
 if [[ "\$1" == "-v" || "\$1" == "--version" ]]; then

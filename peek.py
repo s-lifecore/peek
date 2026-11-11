@@ -18,7 +18,7 @@ SUPPORTED_EXT = {'.md', '.markdown', '.txt', '.pdf',
                  '.png', '.jpg', '.jpeg', '.gif', '.webp', '.svg',
                  '.csv', '.tsv'}
 IMAGE_EXT = {'.png', '.jpg', '.jpeg', '.gif', '.webp', '.svg'}
-VERSION = "1.18.0"
+VERSION = "1.18.1"
 MAX_FILE_BYTES = 10 * 1024 * 1024  # 10 MB
 
 CONFIG_FILE = Path.home() / ".config" / "peek" / "settings.json"
@@ -1951,6 +1951,7 @@ def _do_update():
     if existing and existing != str(peak_bin):
         print(f"peek: 'peak' コマンドが既に存在するためスキップ: {existing}")
     else:
+        peak_bin.unlink(missing_ok=True)
         peak_bin.write_text(
             f'#!/bin/bash\n'
             f'if [[ "$1" == "-v" || "$1" == "--version" ]]; then\n'
