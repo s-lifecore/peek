@@ -18,7 +18,7 @@ SUPPORTED_EXT = {'.md', '.markdown', '.txt', '.pdf',
                  '.png', '.jpg', '.jpeg', '.gif', '.webp', '.svg',
                  '.csv', '.tsv'}
 IMAGE_EXT = {'.png', '.jpg', '.jpeg', '.gif', '.webp', '.svg'}
-VERSION = "1.18.1"
+VERSION = "1.18.2"
 MAX_FILE_BYTES = 10 * 1024 * 1024  # 10 MB
 
 CONFIG_FILE = Path.home() / ".config" / "peek" / "settings.json"
@@ -116,6 +116,9 @@ HOW IT WORKS:
   Browser mode (default): starts a local Flask server and opens the browser.
   TUI mode (-t): renders the file directly in the terminal using textual.
   With -e, server runs in background and terminal is freed (kill <PID> to stop).
+
+BUGS / FEEDBACK:
+  https://github.com/s-lifecore/peek/issues
 """.format(version=VERSION)
 
 HELP_JA = """peek {version} - WSL / Linux / macOS ターミナル用 GUI ファイルビューア
@@ -157,6 +160,9 @@ HELP_JA = """peek {version} - WSL / Linux / macOS ターミナル用 GUI ファ�
   ブラウザモード（デフォルト）: Flask ローカルサーバーを起動しブラウザで開く。
   TUI モード (-t): textual を使ってターミナル内に直接レンダリング。
   -e: サーバーがバックグラウンドで動作し、端末が解放されます（kill <PID> で停止）。
+
+バグ報告・機能追加の要望:
+  https://github.com/s-lifecore/peek/issues
 """.format(version=VERSION)
 
 

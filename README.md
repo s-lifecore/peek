@@ -352,6 +352,14 @@ brew install chafa       # macOS
 
 ---
 
+## バグ報告・機能追加の要望
+
+GitHub Issues からお気軽にどうぞ。
+
+- **バグ報告・機能追加:** [github.com/s-lifecore/peek/issues](https://github.com/s-lifecore/peek/issues)
+
+---
+
 ## ライセンス
 
 [MIT License](LICENSE)
