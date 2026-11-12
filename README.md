@@ -20,6 +20,8 @@ peek -s                 # 設定画面を開く
 - **PDF ビューア** — ブラウザのネイティブ PDF ビューア、TUI では pdftotext でテキスト抽出
 - **画像ビューア** — PNG / JPG / GIF / WEBP / SVG をブラウザで表示、TUI では chafa でプレビュー
 - **CSV / TSV ビューア** — ブラウザでソート対応テーブル表示、TUI ではテキスト表形式
+- **コードビューア** — `.py` `.js` `.html` `.css` など 40 以上の言語をシンタックスハイライト表示・編集対応
+- **diff ビューア** — `peek file1 file2` で差分表示、`git diff | peek` でパイプ入力にも対応
 - **テキスト表示** — 行番号付きで等幅フォント表示
 - **PDF 生成** — `.md` から PDF を直接生成（pandoc / weasyprint 対応）
 - **ライブ編集モード** — `-e` でサーバーをバックグラウンドに切り離し、ブラウザ上でリアルタイム編集
@@ -97,6 +99,8 @@ peek -t notes.txt       # 行番号付きテキスト表示
 peek -t document.pdf    # pdftotext でテキスト抽出して表示
 peek -t photo.png       # chafa でターミナル内プレビュー
 peek -t data.csv        # テキスト表形式で表示
+peek -t script.py       # シンタックスハイライト表示
+peek -t -e index.html   # HTML ファイルをエディタで開く
 ```
 
 **操作キー（デフォルト設定）:**
@@ -184,6 +188,8 @@ TUI の設定画面が起動します。保存すると `~/.config/peek/settings
 | `.pdf` | ブラウザのネイティブ PDF ビューア | pdftotext でテキスト抽出（要 poppler-utils） |
 | `.png` `.jpg` `.jpeg` `.gif` `.webp` `.svg` | 画像を直接表示 | chafa でターミナルプレビュー（要 chafa） |
 | `.csv` `.tsv` | ソート可能なテーブル表示 | テキスト表形式 |
+| `.py` `.js` `.ts` `.html` `.css` `.go` `.rs` `.json` `.yaml` ... | シンタックスハイライト表示（40以上の言語） | Rich でシンタックスハイライト |
+| `.diff` `.patch` | 差分シンタックスハイライト | Rich でシンタックスハイライト |
 
 > **TUI で PDF を表示:** `sudo apt install poppler-utils`（Linux / WSL）/ `brew install poppler`（macOS）  
 > **TUI で画像を表示:** `sudo apt install chafa`（Linux / WSL）/ `brew install chafa`（macOS）

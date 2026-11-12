@@ -676,7 +676,7 @@
     </div>
   </div>
 
-  {% if edit_mode and file_type not in ('pdf', 'image', 'code') %}
+  {% if edit_mode and file_type not in ('pdf', 'image') %}
 
   <div class="editor-layout">
     <div class="editor-pane" id="editor-pane">
@@ -995,7 +995,7 @@
   </script>
   {% endif %}
 
-  {% if edit_mode and file_type not in ('pdf', 'image', 'code') %}
+  {% if edit_mode and file_type not in ('pdf', 'image') %}
   <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/dompurify@3/dist/purify.min.js"></script>
   <script>

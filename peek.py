@@ -26,6 +26,7 @@ CODE_EXT = {
     '.java', '.kt',
     '.rb', '.php', '.lua', '.swift',
     '.sh', '.bash', '.zsh', '.fish',
+    '.html', '.htm',
     '.json', '.yaml', '.yml', '.toml',
     '.xml', '.css', '.scss', '.less',
     '.sql', '.r', '.tf',
@@ -119,7 +120,7 @@ SUPPORTED FILE TYPES:
   .png / .jpg / .jpeg   Images displayed in browser / TUI: chafa preview (optional)
   .gif / .webp / .svg   Images displayed in browser / TUI: chafa preview (optional)
   .csv / .tsv           Tabular data rendered as sortable table
-  .py / .js / .ts / ... Code files with syntax highlighting (40+ languages)
+  .py / .js / .html / . Code files with syntax highlighting (40+ languages)
   .diff / .patch        Diff files with syntax highlighting
 
 EXAMPLES:
@@ -168,7 +169,7 @@ HELP_JA = """peek {version} - WSL / Linux / macOS ターミナル用 GUI ファ�
   .png / .jpg / .jpeg    ブラウザで画像表示 / TUI: chafa でプレビュー（要インストール）
   .gif / .webp / .svg    ブラウザで画像表示 / TUI: chafa でプレビュー（要インストール）
   .csv / .tsv            ブラウザ: ソート対応テーブル表示 / TUI: テキスト表形式
-  .py / .js / .ts / ...  シンタックスハイライト付きコード表示（40以上の言語対応）
+  .py / .js / .html /... シンタックスハイライト付きコード表示（40以上の言語対応）
   .diff / .patch         差分ファイルのシンタックスハイライト表示
 
 使用例:
@@ -646,8 +647,8 @@ def create_app(target_file, access_token, platform="windows", edit_mode=False):
         return jsonify({"success": True, "filename": output_pdf.name,
                         "path": dest, "platform": platform})
 
-    # Extensions allowed as save-as destinations (edit targets only, not .pdf)
-    _SAVEABLE_EXT = {'.md', '.markdown', '.txt', '.csv', '.tsv'}
+    # Allow saving any text-based type (exclude binary: images, pdf)
+    _SAVEABLE_EXT = SUPPORTED_EXT - IMAGE_EXT - {'.pdf'}
 
     @app.route("/save-as", methods=["POST"])
     def save_as():
@@ -748,6 +749,7 @@ def _run_tui(target_file, edit_mode=False):
         content, _csv_total = _format_csv_tui(path)
     elif ext in CODE_EXT:
         file_type = 'code'
+        content = path.read_text(encoding='utf-8', errors='replace')
         try:
             from rich.syntax import Syntax as _RichSyntax
             _EXT_ALIAS = {
@@ -757,13 +759,13 @@ def _run_tui(target_file, edit_mode=False):
                 'tsx': 'typescript', 'hpp': 'cpp', 'cc': 'cpp', 'cxx': 'cpp',
                 'h': 'c', 'kt': 'kotlin', 'less': 'css',
                 'patch': 'diff', 'cfg': 'ini', 'conf': 'ini',
+                'htm': 'html',
             }
             _lname = _EXT_ALIAS.get(ext.lstrip('.'), ext.lstrip('.') or 'text')
-            _code = path.read_text(encoding='utf-8', errors='replace')
-            _rich_syntax = _RichSyntax(_code, _lname, theme='monokai',
+            _rich_syntax = _RichSyntax(content, _lname, theme='monokai',
                                         line_numbers=True, background_color='default')
         except Exception:
-            content = path.read_text(encoding='utf-8', errors='replace')
+            pass
 
     # Load user settings
     settings = _load_settings()
@@ -794,10 +796,6 @@ def _run_tui(target_file, edit_mode=False):
         if file_type == 'image':
             print("peek: 画像ファイルは編集モードに対応していません。")
             sys.exit(1)
-        if file_type == 'code':
-            print("peek: コードファイルは TUI 編集モードに対応していません。")
-            sys.exit(1)
-
         from rich.markdown import Markdown as RichMarkdown
 
         edit_bindings = []
@@ -2258,10 +2256,6 @@ def main():
     if edit_mode and ext in IMAGE_EXT:
         print("peek: 画像ファイルは編集モードに対応していません。")
         sys.exit(1)
-    if edit_mode and ext in CODE_EXT:
-        print("peek: コードファイルは編集モードに対応していません。")
-        sys.exit(1)
-
     if tui_mode:
         _run_tui(target_file, edit_mode=edit_mode)
         sys.exit(0)
