@@ -6,6 +6,7 @@
 # refactor: etc.   → patch bump  (1.3.0 → 1.3.1)
 # BREAKING: /
 # major:           → major bump  (1.3.0 → 2.0.0)
+# chore:           → no bump (infra / template / config changes)
 
 COMMIT_MSG=$(cat "$1")
 REPO_ROOT=$(git rev-parse --show-toplevel)
@@ -14,8 +15,8 @@ PEEK_FILE="$REPO_ROOT/peek.py"
 # Skip if peek.py doesn't exist
 [ -f "$PEEK_FILE" ] || exit 0
 
-# Skip merge / revert commits
-echo "$COMMIT_MSG" | grep -qE "^(Merge|Revert)" && exit 0
+# Skip merge / revert / chore commits
+echo "$COMMIT_MSG" | grep -qE "^(Merge|Revert|chore(\(.+\))?:)" && exit 0
 
 # Read current version
 CURRENT=$(grep -oP 'VERSION = "\K[0-9]+\.[0-9]+\.[0-9]+' "$PEEK_FILE")
