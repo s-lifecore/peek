@@ -23,6 +23,8 @@ peek -s                 # 設定画面を開く
 - **コードビューア** — `.py` `.js` `.html` `.css` など 40 以上の言語をシンタックスハイライト表示・編集対応
 - **diff ビューア** — `peek file1 file2` で差分表示、`git diff | peek` でパイプ入力にも対応
 - **テキスト表示** — 行番号付きで等幅フォント表示
+- **URL 表示** — `peek https://...` でリモートファイルを直接取得して表示
+- **プリントモード** — `-p` でターミナルに ANSI フォーマット出力（パイプ対応）
 - **PDF 生成** — `.md` から PDF を直接生成（pandoc / weasyprint 対応）
 - **ライブ編集モード** — `-e` でサーバーをバックグラウンドに切り離し、ブラウザ上でリアルタイム編集
 - **名前を付けて保存** — ブラウザのネイティブファイルダイアログで保存先を指定
@@ -78,17 +80,18 @@ peek --version
 ## 使い方
 
 ```bash
-peek [オプション] <ファイル>
+peek [オプション] <ファイル または URL>
 ```
 
 ### ブラウザモード（デフォルト）
 
 ```bash
-peek README.md          # OS を自動検出してブラウザで開く
-peek -b README.md       # 同上（明示指定）
-peek -w README.md       # Windows のデフォルトブラウザで開く
-peek -l notes.txt       # Linux のデフォルトブラウザで開く
-peek -m README.md       # macOS のデフォルトブラウザで開く
+peek README.md                      # OS を自動検出してブラウザで開く
+peek -b README.md                   # 同上（明示指定）
+peek -w README.md                   # Windows のデフォルトブラウザで開く
+peek -l notes.txt                   # Linux のデフォルトブラウザで開く
+peek -m README.md                   # macOS のデフォルトブラウザで開く
+peek https://example.com/file.md    # URL から直接取得して表示
 ```
 
 ### TUI モード
@@ -126,6 +129,29 @@ peek -t -e README.md    # 左: エディタ、右: Markdown プレビュー（�
 |------|------|
 | `Ctrl+S` | 保存 |
 | `Ctrl+Q` | 終了 |
+
+### URL 表示
+
+```bash
+peek https://raw.githubusercontent.com/user/repo/main/README.md
+peek -t https://example.com/script.py    # TUI で表示
+peek -p https://example.com/notes.txt    # ターミナルに出力
+```
+
+ファイルをローカルにダウンロードせず、直接表示できます。  
+Content-Type ヘッダーまたは URL の拡張子からファイル形式を自動判定します。
+
+### プリントモード
+
+```bash
+peek -p README.md           # Markdown を ANSI フォーマットで出力
+peek -p script.py           # シンタックスハイライト付きで出力
+peek -p data.csv            # テーブル形式で出力
+peek -p README.md | head -20    # パイプ対応
+```
+
+ブラウザ・TUI を起動せず、Rich によるフォーマット出力をターミナルに直接表示します。  
+`head` や `grep` などとパイプで組み合わせて使えます。
 
 ### 編集モード（ブラウザ）
 
@@ -171,6 +197,7 @@ TUI の設定画面が起動します。保存すると `~/.config/peek/settings
 | `-l`, `--linux` | ブラウザ: Linux のデフォルトブラウザ・`~/Downloads/` に保存 |
 | `-m`, `--mac` | ブラウザ: macOS のデフォルトブラウザ・`~/Downloads/` に保存 |
 | `-e`, `--edit` | 編集モード: バックグラウンドサーバー + ブラウザライブエディタ（`-t` と組み合わせで TUI エディタ） |
+| `-p`, `--print` | ターミナルに ANSI フォーマット出力（Markdown / コード / CSV 対応・パイプ可） |
 | `-s`, `--settings` | TUI 設定画面を開く（単独フラグ） |
 | `--update` | git から最新版を取得して依存関係を更新 |
 | `--help-ja` | 日本語ヘルプを表示 |

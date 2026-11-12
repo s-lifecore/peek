@@ -36,7 +36,7 @@ CODE_EXT = {
 SUPPORTED_EXT = {'.md', '.markdown', '.txt', '.pdf',
                  '.png', '.jpg', '.jpeg', '.gif', '.webp', '.svg',
                  '.csv', '.tsv'} | CODE_EXT
-VERSION = "1.20.0"
+VERSION = "1.21.0"
 MAX_FILE_BYTES = 10 * 1024 * 1024  # 10 MB
 
 CONFIG_FILE = Path.home() / ".config" / "peek" / "settings.json"
@@ -107,6 +107,7 @@ OPTIONS:
   -l, --linux           Browser: Linux default browser, save to ~/Downloads/
   -m, --mac             Browser: macOS default browser, save to ~/Downloads/
   -e, --edit            Edit mode: browser live editor (detached server) or TUI editor with -t
+  -p, --print           Print to terminal with ANSI formatting (pipe-friendly)
   -s, --settings        Open TUI settings (theme, colors, keybindings) — standalone flag
   --update              Pull latest version from git and reinstall deps
   --help-en             Show this help (English)
@@ -124,16 +125,19 @@ SUPPORTED FILE TYPES:
   .diff / .patch        Diff files with syntax highlighting
 
 EXAMPLES:
-  peek README.md             # browser (default, platform auto-detected)
-  peek -t README.md          # TUI viewer
-  peek -t -e README.md       # TUI editor with live preview (Ctrl+S: save, Ctrl+Q: quit)
-  peek -w README.md          # Windows browser
-  peek -l notes.txt          # Linux browser
-  peek -m README.md          # macOS browser
-  peek -e README.md          # browser live editor
-  peek file1.py file2.py     # diff viewer (unified diff with syntax highlighting)
-  git diff | peek            # pipe output directly to peek
-  cat log.txt | peek -t      # pipe to TUI viewer
+  peek README.md                      # browser (default, platform auto-detected)
+  peek -t README.md                   # TUI viewer
+  peek -t -e README.md                # TUI editor with live preview (Ctrl+S: save, Ctrl+Q: quit)
+  peek -w README.md                   # Windows browser
+  peek -l notes.txt                   # Linux browser
+  peek -m README.md                   # macOS browser
+  peek -e README.md                   # browser live editor
+  peek -p README.md                   # print with ANSI formatting
+  peek -p README.md | head -20        # pipe-friendly print
+  peek file1.py file2.py              # diff viewer (unified diff with syntax highlighting)
+  peek https://example.com/file.md    # fetch and view remote URL
+  git diff | peek                     # pipe output directly to peek
+  cat log.txt | peek -t               # pipe to TUI viewer
 
 HOW IT WORKS:
   Browser mode (default): starts a local Flask server and opens the browser.
@@ -156,6 +160,7 @@ HELP_JA = """peek {version} - WSL / Linux / macOS ターミナル用 GUI ファ�
   -l, --linux           ブラウザ: Linux のデフォルトブラウザ・~/Downloads/ に保存
   -m, --mac             ブラウザ: macOS のデフォルトブラウザ・~/Downloads/ に保存
   -e, --edit            編集モード: ブラウザライブエディタ（バックグラウンド）/ -t と組み合わせて TUI エディタ
+  -p, --print           ターミナルに ANSI フォーマット出力（パイプ対応）
   -s, --settings        TUI 設定画面を開く（テーマ・カラー・キーバインド）— 単独フラグ
   --update              git から最新版を取得して依存関係を更新
   --help-en             英語のヘルプを表示
@@ -173,16 +178,19 @@ HELP_JA = """peek {version} - WSL / Linux / macOS ターミナル用 GUI ファ�
   .diff / .patch         差分ファイルのシンタックスハイライト表示
 
 使用例:
-  peek README.md             # ブラウザで開く（デフォルト・OS 自動検出）
-  peek -t README.md          # TUI ビューア
-  peek -t -e README.md       # TUI エディタ（リアルタイムプレビュー / Ctrl+S: 保存 / Ctrl+Q: 終了）
-  peek -w README.md          # Windows ブラウザ
-  peek -l notes.txt          # Linux ブラウザ
-  peek -m README.md          # macOS ブラウザ
-  peek -e README.md          # ブラウザライブエディタ
-  peek file1.py file2.py     # 差分ビューア（ユニファイド差分・シンタックスハイライト付き）
-  git diff | peek            # パイプ出力を直接 peek に渡す
-  cat log.txt | peek -t      # TUI ビューアにパイプ
+  peek README.md                      # ブラウザで開く（デフォルト・OS 自動検出）
+  peek -t README.md                   # TUI ビューア
+  peek -t -e README.md                # TUI エディタ（リアルタイムプレビュー / Ctrl+S: 保存 / Ctrl+Q: 終了）
+  peek -w README.md                   # Windows ブラウザ
+  peek -l notes.txt                   # Linux ブラウザ
+  peek -m README.md                   # macOS ブラウザ
+  peek -e README.md                   # ブラウザライブエディタ
+  peek -p README.md                   # ANSI フォーマット出力
+  peek -p README.md | head -20        # パイプ対応出力
+  peek file1.py file2.py              # 差分ビューア（ユニファイド差分・シンタックスハイライト付き）
+  peek https://example.com/file.md    # URL から直接取得して表示
+  git diff | peek                     # パイプ出力を直接 peek に渡す
+  cat log.txt | peek -t               # TUI ビューアにパイプ
 
 仕組み:
   ブラウザモード（デフォルト）: Flask ローカルサーバーを起動しブラウザで開く。
@@ -2055,6 +2063,108 @@ Screen  { background: #1e1e2e; align: center middle; }
     _PeakApp().run()
 
 
+def _fetch_url_to_tempfile(url):
+    """Fetch a URL and write content to a temp file. Returns the temp file path."""
+    import urllib.request
+    import urllib.error
+    from urllib.parse import urlparse
+    _CT_TO_EXT = {
+        'text/markdown': '.md', 'text/x-markdown': '.md',
+        'text/plain': '.txt', 'text/html': '.html',
+        'text/css': '.css', 'text/csv': '.csv',
+        'application/javascript': '.js', 'text/javascript': '.js',
+        'application/json': '.json', 'application/pdf': '.pdf',
+        'image/png': '.png', 'image/jpeg': '.jpg',
+        'image/gif': '.gif', 'image/webp': '.webp', 'image/svg+xml': '.svg',
+        'text/x-python': '.py', 'application/x-python-code': '.py',
+        'application/yaml': '.yaml', 'text/yaml': '.yaml', 'text/x-yaml': '.yaml',
+        'text/x-diff': '.diff', 'text/x-patch': '.patch',
+    }
+    try:
+        req = urllib.request.Request(url, headers={'User-Agent': f'peek/{VERSION}'})
+        with urllib.request.urlopen(req, timeout=15) as resp:
+            content_type = resp.headers.get_content_type()
+            raw = resp.read()
+    except urllib.error.HTTPError as e:
+        print(f"peek: URL の取得に失敗しました: HTTP {e.code} {e.reason}")
+        sys.exit(1)
+    except Exception as e:
+        print(f"peek: URL の取得に失敗しました: {e}")
+        sys.exit(1)
+
+    # Prefer extension from URL path; fall back to Content-Type
+    url_ext = Path(urlparse(url).path).suffix.lower()
+    if url_ext in SUPPORTED_EXT:
+        suffix = url_ext
+    else:
+        suffix = _CT_TO_EXT.get(content_type, '.txt')
+        if suffix not in SUPPORTED_EXT:
+            suffix = '.txt'
+
+    tmp = tempfile.NamedTemporaryFile(
+        suffix=suffix, prefix='peek_url_', mode='wb', delete=False
+    )
+    tmp.write(raw)
+    tmp.close()
+    atexit.register(os.unlink, tmp.name)
+    return tmp.name
+
+
+def _run_print(file_path):
+    """Print file content to terminal with ANSI formatting (Rich)."""
+    path = Path(file_path)
+    ext = path.suffix.lower()
+
+    if ext in IMAGE_EXT or ext == '.pdf':
+        print(f"peek: '{ext}' ファイルは -p モードに対応していません。")
+        sys.exit(1)
+
+    try:
+        from rich.console import Console
+        console = Console()
+    except ImportError:
+        print(path.read_text(encoding='utf-8', errors='replace'))
+        return
+
+    if ext in ('.md', '.markdown'):
+        from rich.markdown import Markdown
+        text = path.read_text(encoding='utf-8', errors='replace')
+        console.print(Markdown(text))
+    elif ext in CODE_EXT:
+        from rich.syntax import Syntax
+        text = path.read_text(encoding='utf-8', errors='replace')
+        _EXT_ALIAS = {
+            'sh': 'bash', 'zsh': 'bash', 'fish': 'fish', 'yml': 'yaml',
+            'pyw': 'python', 'mjs': 'javascript', 'cjs': 'javascript',
+            'jsx': 'javascript', 'tsx': 'typescript', 'hpp': 'cpp',
+            'cc': 'cpp', 'cxx': 'cpp', 'h': 'c', 'kt': 'kotlin',
+            'less': 'css', 'patch': 'diff', 'cfg': 'ini', 'conf': 'ini',
+            'htm': 'html',
+        }
+        lang = _EXT_ALIAS.get(ext.lstrip('.'), ext.lstrip('.') or 'text')
+        syntax = Syntax(text, lang, theme='monokai', line_numbers=True,
+                        background_color='default')
+        console.print(syntax)
+    elif ext in ('.csv', '.tsv'):
+        import csv
+        from rich.table import Table
+        delim = '\t' if ext == '.tsv' else ','
+        text = path.read_text(encoding='utf-8', errors='replace')
+        rows = list(csv.reader(text.splitlines(), delimiter=delim))
+        if not rows:
+            return
+        table = Table(show_header=True, header_style="bold cyan")
+        for col in rows[0]:
+            table.add_column(col)
+        for row in rows[1:]:
+            table.add_row(*row)
+        console.print(table)
+    else:
+        text = path.read_text(encoding='utf-8', errors='replace')
+        for i, line in enumerate(text.splitlines(), 1):
+            print(f"{i:4d}  {line}")
+
+
 def _do_update():
     script_dir = os.path.dirname(os.path.abspath(__file__))
     venv_pip = str(Path.home() / ".local" / "share" / "peek-venv" / "bin" / "pip")
@@ -2095,11 +2205,11 @@ def _do_update():
 _ALL_FLAGS = [
     '-t', '--tui', '-b', '--browser',
     '-w', '--windows', '-l', '--linux', '-m', '--mac',
-    '-e', '--edit', '-s', '--settings',
+    '-e', '--edit', '-p', '--print', '-s', '--settings',
     '--update', '--help-en', '--help-ja', '--version', '-v',
     '--peek', '--peak', '--matrix', '--aquarium', '--zen', '--404', '--catch',
 ]
-_SHORT_FLAGS = set('tblmwevs')
+_SHORT_FLAGS = set('tblmwevsp')
 
 
 def _suggest_flag(arg):
@@ -2145,13 +2255,15 @@ def main():
     if not args:
         print(f"peek {VERSION}  —  ファイルビューア for WSL / Linux / macOS")
         print()
-        print("  使い方: peek [オプション] <ファイル>")
+        print("  使い方: peek [オプション] <ファイル または URL>")
         print()
-        print("    peek README.md          ブラウザで開く（デフォルト）")
-        print("    peek -t README.md       TUI で開く")
-        print("    peek -t -e README.md    TUI エディタ（リアルタイムプレビュー）")
-        print("    peek -e README.md       ブラウザライブエディタ")
-        print("    peek -s                 設定（テーマ・カラー・キーバインド）")
+        print("    peek README.md                   ブラウザで開く（デフォルト）")
+        print("    peek -t README.md                TUI で開く")
+        print("    peek -p README.md                ターミナルに出力")
+        print("    peek -t -e README.md             TUI エディタ（リアルタイムプレビュー）")
+        print("    peek -e README.md                ブラウザライブエディタ")
+        print("    peek https://example.com/f.md    URL から直接表示")
+        print("    peek -s                          設定（テーマ・カラー・キーバインド）")
         print()
         print("  詳細: peek --help-ja  /  peek --help-en")
         sys.exit(1)
@@ -2212,6 +2324,7 @@ def main():
     platform = _detect_default_platform()
     tui_mode = False
     edit_mode = False
+    print_mode = False
     clean_args = []
     for arg in args:
         if arg in ("-t", "--tui"):
@@ -2229,6 +2342,8 @@ def main():
             tui_mode = False
         elif arg in ("-e", "--edit"):
             edit_mode = True
+        elif arg in ("-p", "--print"):
+            print_mode = True
         elif arg in ("-s", "--settings"):
             print("peek: '-s' は単独で使用してください（他のオプションやファイルと組み合わせられません）")
             print("      詳細: peek --help-ja  /  peek --help-en")
@@ -2251,6 +2366,16 @@ def main():
             print("peek: ファイルが指定されていません。")
             print("      使い方: peek [オプション] <ファイル>")
             sys.exit(1)
+
+    # Resolve URL args to temp files
+    resolved_args = []
+    for _a in args:
+        if _a.startswith(('http://', 'https://')):
+            print(f"peek: Fetching {_a} ...")
+            resolved_args.append(_fetch_url_to_tempfile(_a))
+        else:
+            resolved_args.append(_a)
+    args = resolved_args
 
     if len(args) == 2:
         _f1, _f2 = os.path.abspath(args[0]), os.path.abspath(args[1])
@@ -2305,6 +2430,9 @@ def main():
     if edit_mode and ext in IMAGE_EXT:
         print("peek: 画像ファイルは編集モードに対応していません。")
         sys.exit(1)
+    if print_mode:
+        _run_print(target_file)
+        sys.exit(0)
     if tui_mode:
         _run_tui(target_file, edit_mode=edit_mode)
         sys.exit(0)
