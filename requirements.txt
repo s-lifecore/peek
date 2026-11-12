@@ -2,3 +2,4 @@ flask>=3.0.0
 markdown2>=2.4.0
 weasyprint>=60.0
 textual>=0.47.0
+nh3>=0.2.0

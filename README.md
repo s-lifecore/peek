@@ -29,7 +29,7 @@ peek -s                 # 設定画面を開く
 - **設定画面** — `-s` でテーマ・カラー・フォント・キーバインドを TUI で変更
 - **マルチプラットフォーム** — WSL / Linux / macOS に対応
 - **ファイルダウンロード** — Windows は `C:\Users\...\Downloads\` へ、Linux / macOS は `~/Downloads/` に保存
-- **セキュリティ** — アクセストークン認証、XSS・LFI 防止、セキュリティヘッダー付き
+- **セキュリティ** — アクセストークン認証、nh3 による XSS サニタイズ、CSP / Referrer-Policy ヘッダー付き
 - **もしかして？** — 不明なオプション入力時に近いコマンドを提案
 - **peak コマンド** — `peak` と打ち間違えたときにグラフアニメーションを表示（`sl` と同じ立場）
 
@@ -255,7 +255,8 @@ peek --update
    - macOS: `open <URL>`
 3. `.md` は markdown2 でサーバーサイドレンダリング
 4. アクセストークンによるセッション認証でローカル外からのアクセスを防止
-5. DOMPurify（クライアントサイド）+ HTML サニタイザー（サーバーサイド）で XSS を防止
+5. nh3（Rust 製 ammonia バインディング）でサーバーサイド XSS サニタイズ、DOMPurify でクライアントサイドも二重防御
+6. CSP・Referrer-Policy・X-Frame-Options 等のセキュリティヘッダーを全レスポンスに付与
 
 **TUI モード (`-t`):**
 1. textual がターミナル上に直接レンダリング
@@ -274,6 +275,7 @@ WSLg は不要です。
 - Python 3.8+
 - [Flask](https://flask.palletsprojects.com/) — ローカル HTTP サーバー
 - [markdown2](https://github.com/trentm/python-markdown2) — Markdown レンダリング
+- [nh3](https://github.com/messense/nh3) — Rust 製 HTML サニタイザー（XSS 防止）
 - [WeasyPrint](https://weasyprint.org/) — HTML → PDF 変換（PDF 生成機能用）
 - [textual](https://github.com/Textualize/textual) — TUI フレームワーク（`-t` / `-s` モード用）
 

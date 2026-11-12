@@ -36,7 +36,7 @@ CODE_EXT = {
 SUPPORTED_EXT = {'.md', '.markdown', '.txt', '.pdf',
                  '.png', '.jpg', '.jpeg', '.gif', '.webp', '.svg',
                  '.csv', '.tsv'} | CODE_EXT
-VERSION = "1.19.0"
+VERSION = "1.20.0"
 MAX_FILE_BYTES = 10 * 1024 * 1024  # 10 MB
 
 CONFIG_FILE = Path.home() / ".config" / "peek" / "settings.json"
@@ -330,15 +330,52 @@ _RE_DANGEROUS_TAG = re.compile(
     re.DOTALL | re.IGNORECASE,
 )
 _RE_EVENT_HANDLER = re.compile(r'\s+on\w+\s*=\s*(?:"[^"]*"|\'[^\']*\'|[^\s>]+)', re.IGNORECASE)
-_RE_JS_URL = re.compile(r'(href|src|action)\s*=\s*["\']?\s*javascript:', re.IGNORECASE)
+_RE_BAD_URL = re.compile(
+    r'((?:href|src|action|formaction)\s*=\s*["\'])(?:javascript|vbscript|data\b)[^"\']*(["\'])',
+    re.IGNORECASE,
+)
+
+# Allowed tags and attributes for nh3-based sanitization
+_NH3_TAGS = {
+    "a", "abbr", "b", "blockquote", "br", "code", "del", "em",
+    "h1", "h2", "h3", "h4", "h5", "h6", "hr", "i", "img",
+    "input", "li", "ol", "p", "pre", "s", "strong",
+    "table", "tbody", "td", "th", "thead", "tr", "ul",
+    "div", "span",
+}
+_NH3_ATTRS = {
+    "a":     {"href", "title"},
+    "img":   {"src", "alt", "title"},
+    "input": {"type", "checked", "disabled"},
+    "code":  {"class"},
+    "pre":   {"class"},
+    "div":   {"class"},
+    "span":  {"class"},
+    "th":    {"align"},
+    "td":    {"align"},
+    "h1": {"id"}, "h2": {"id"}, "h3": {"id"},
+    "h4": {"id"}, "h5": {"id"}, "h6": {"id"},
+}
 
 
 def _sanitize_html(html):
-    """Strip dangerous tags, event handlers, and javascript: URLs from HTML."""
-    html = _RE_DANGEROUS_TAG.sub('', html)
-    html = _RE_EVENT_HANDLER.sub('', html)
-    html = _RE_JS_URL.sub(r'\1="#"', html)
-    return html
+    """Strip dangerous tags/attrs from rendered Markdown HTML.
+
+    Uses nh3 (Rust-backed ammonia) when available; falls back to regex.
+    """
+    try:
+        import nh3
+        return nh3.clean(
+            html,
+            tags=_NH3_TAGS,
+            attributes=_NH3_ATTRS,
+            url_schemes={"http", "https", "mailto"},
+        )
+    except ImportError:
+        html = _RE_DANGEROUS_TAG.sub('', html)
+        html = _RE_EVENT_HANDLER.sub('', html)
+        html = _RE_BAD_URL.sub(r'\1#\2', html)
+        return html
 
 
 def _make_restricted_fetcher(allowed_dir):
@@ -476,6 +513,17 @@ def create_app(target_file, access_token, platform="windows", edit_mode=False):
         response.headers["X-Content-Type-Options"] = "nosniff"
         response.headers["X-Frame-Options"] = "SAMEORIGIN"
         response.headers["Cache-Control"] = "no-store"
+        response.headers["Referrer-Policy"] = "no-referrer"
+        response.headers["Content-Security-Policy"] = (
+            "default-src 'self'; "
+            "script-src 'self' 'unsafe-inline' "
+            "https://cdnjs.cloudflare.com https://cdn.jsdelivr.net; "
+            "style-src 'self' 'unsafe-inline' "
+            "https://cdnjs.cloudflare.com https://fonts.googleapis.com; "
+            "font-src https://fonts.gstatic.com; "
+            "img-src 'self' data: blob:; "
+            "frame-src 'self';"
+        )
         return response
 
     # ── Helpers ───────────────────────────────────────────────────────────────
@@ -647,8 +695,9 @@ def create_app(target_file, access_token, platform="windows", edit_mode=False):
         return jsonify({"success": True, "filename": output_pdf.name,
                         "path": dest, "platform": platform})
 
-    # Allow saving any text-based type (exclude binary: images, pdf)
-    _SAVEABLE_EXT = SUPPORTED_EXT - IMAGE_EXT - {'.pdf'}
+    # Allow saving any text-based type; exclude binary and directly-executable scripts
+    _SHELL_EXT = {'.sh', '.bash', '.zsh', '.fish'}
+    _SAVEABLE_EXT = SUPPORTED_EXT - IMAGE_EXT - {'.pdf'} - _SHELL_EXT
 
     @app.route("/save-as", methods=["POST"])
     def save_as():
@@ -2277,6 +2326,8 @@ def main():
             pid = 0  # os.fork unavailable, run in foreground
 
         if pid > 0:
+            # Unregister temp-file cleanup so stdin/diff temps survive in child
+            atexit.unregister(os.unlink)
             print(f"      PID {pid} — kill {pid} to stop")
             sys.exit(0)
 
