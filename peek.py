@@ -12,12 +12,29 @@ import threading
 import time
 import socket
 import difflib
+import tempfile
+import atexit
 from pathlib import Path
 
+IMAGE_EXT = {'.png', '.jpg', '.jpeg', '.gif', '.webp', '.svg'}
+CODE_EXT = {
+    '.py', '.pyw',
+    '.js', '.mjs', '.cjs', '.jsx',
+    '.ts', '.tsx',
+    '.go', '.rs',
+    '.c', '.h', '.cc', '.cpp', '.cxx', '.hpp',
+    '.java', '.kt',
+    '.rb', '.php', '.lua', '.swift',
+    '.sh', '.bash', '.zsh', '.fish',
+    '.json', '.yaml', '.yml', '.toml',
+    '.xml', '.css', '.scss', '.less',
+    '.sql', '.r', '.tf',
+    '.diff', '.patch',
+    '.ini', '.cfg', '.conf',
+}
 SUPPORTED_EXT = {'.md', '.markdown', '.txt', '.pdf',
                  '.png', '.jpg', '.jpeg', '.gif', '.webp', '.svg',
-                 '.csv', '.tsv'}
-IMAGE_EXT = {'.png', '.jpg', '.jpeg', '.gif', '.webp', '.svg'}
+                 '.csv', '.tsv'} | CODE_EXT
 VERSION = "1.18.2"
 MAX_FILE_BYTES = 10 * 1024 * 1024  # 10 MB
 
@@ -102,6 +119,8 @@ SUPPORTED FILE TYPES:
   .png / .jpg / .jpeg   Images displayed in browser / TUI: chafa preview (optional)
   .gif / .webp / .svg   Images displayed in browser / TUI: chafa preview (optional)
   .csv / .tsv           Tabular data rendered as sortable table
+  .py / .js / .ts / ... Code files with syntax highlighting (40+ languages)
+  .diff / .patch        Diff files with syntax highlighting
 
 EXAMPLES:
   peek README.md             # browser (default, platform auto-detected)
@@ -111,6 +130,9 @@ EXAMPLES:
   peek -l notes.txt          # Linux browser
   peek -m README.md          # macOS browser
   peek -e README.md          # browser live editor
+  peek file1.py file2.py     # diff viewer (unified diff with syntax highlighting)
+  git diff | peek            # pipe output directly to peek
+  cat log.txt | peek -t      # pipe to TUI viewer
 
 HOW IT WORKS:
   Browser mode (default): starts a local Flask server and opens the browser.
@@ -146,6 +168,8 @@ HELP_JA = """peek {version} - WSL / Linux / macOS ターミナル用 GUI ファ�
   .png / .jpg / .jpeg    ブラウザで画像表示 / TUI: chafa でプレビュー（要インストール）
   .gif / .webp / .svg    ブラウザで画像表示 / TUI: chafa でプレビュー（要インストール）
   .csv / .tsv            ブラウザ: ソート対応テーブル表示 / TUI: テキスト表形式
+  .py / .js / .ts / ...  シンタックスハイライト付きコード表示（40以上の言語対応）
+  .diff / .patch         差分ファイルのシンタックスハイライト表示
 
 使用例:
   peek README.md             # ブラウザで開く（デフォルト・OS 自動検出）
@@ -155,6 +179,9 @@ HELP_JA = """peek {version} - WSL / Linux / macOS ターミナル用 GUI ファ�
   peek -l notes.txt          # Linux ブラウザ
   peek -m README.md          # macOS ブラウザ
   peek -e README.md          # ブラウザライブエディタ
+  peek file1.py file2.py     # 差分ビューア（ユニファイド差分・シンタックスハイライト付き）
+  git diff | peek            # パイプ出力を直接 peek に渡す
+  cat log.txt | peek -t      # TUI ビューアにパイプ
 
 仕組み:
   ブラウザモード（デフォルト）: Flask ローカルサーバーを起動しブラウザで開く。
@@ -419,6 +446,7 @@ def create_app(target_file, access_token, platform="windows", edit_mode=False):
         "&display=swap"
     ) if _gf_list else None
     _tc = _get_theme_colors(_settings)
+    _pyg_style = 'friendly' if _settings.get('theme', '') == 'catppuccin-latte' else 'monokai'
 
     template_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "templates")
     app = Flask(__name__, template_folder=template_dir)
@@ -521,6 +549,22 @@ def create_app(target_file, access_token, platform="windows", edit_mode=False):
             return render_template("view.html", file_type="csv", content="",
                                    csv_headers=headers, csv_rows=rows,
                                    csv_row_count=row_count, **common)
+        elif ext in CODE_EXT:
+            from pygments import highlight
+            from pygments.lexers import get_lexer_for_filename
+            from pygments.formatters import HtmlFormatter
+            from pygments.util import ClassNotFound
+            code = path.read_text(encoding='utf-8', errors='replace')
+            try:
+                lexer = get_lexer_for_filename(str(path), stripall=True)
+            except ClassNotFound:
+                from pygments.lexers import TextLexer
+                lexer = TextLexer()
+            formatter = HtmlFormatter(noclasses=True, style=_pyg_style,
+                                       linenos='table', linenostart=1)
+            highlighted = highlight(code, lexer, formatter)
+            return render_template("view.html", file_type="code",
+                                   content=highlighted, **common)
         else:
             abort(415)
 
@@ -668,6 +712,7 @@ def _run_tui(target_file, edit_mode=False):
     file_type = 'text'
     content = ''
     _chafa_content = None
+    _rich_syntax = None
 
     if ext in ('.md', '.markdown'):
         content = path.read_text(encoding='utf-8')
@@ -701,6 +746,24 @@ def _run_tui(target_file, edit_mode=False):
     elif ext in ('.csv', '.tsv'):
         file_type = 'csv'
         content, _csv_total = _format_csv_tui(path)
+    elif ext in CODE_EXT:
+        file_type = 'code'
+        try:
+            from rich.syntax import Syntax as _RichSyntax
+            _EXT_ALIAS = {
+                'sh': 'bash', 'zsh': 'bash', 'fish': 'fish',
+                'yml': 'yaml', 'pyw': 'python',
+                'mjs': 'javascript', 'cjs': 'javascript', 'jsx': 'javascript',
+                'tsx': 'typescript', 'hpp': 'cpp', 'cc': 'cpp', 'cxx': 'cpp',
+                'h': 'c', 'kt': 'kotlin', 'less': 'css',
+                'patch': 'diff', 'cfg': 'ini', 'conf': 'ini',
+            }
+            _lname = _EXT_ALIAS.get(ext.lstrip('.'), ext.lstrip('.') or 'text')
+            _code = path.read_text(encoding='utf-8', errors='replace')
+            _rich_syntax = _RichSyntax(_code, _lname, theme='monokai',
+                                        line_numbers=True, background_color='default')
+        except Exception:
+            content = path.read_text(encoding='utf-8', errors='replace')
 
     # Load user settings
     settings = _load_settings()
@@ -714,7 +777,8 @@ def _run_tui(target_file, edit_mode=False):
     muted    = colors["muted"]
     vim_mode = (quit_key == "vim" or save_key == "vim")
 
-    TYPE_LABEL = {'markdown': 'MD', 'text': 'TXT', 'pdf': 'PDF'}
+    TYPE_LABEL = {'markdown': 'MD', 'text': 'TXT', 'pdf': 'PDF',
+                  'image': 'IMG', 'csv': 'CSV', 'code': 'CODE'}
 
     cmd_css = (
         f"#cmd-bar {{ dock: bottom; height: 1; background: {surface}; "
@@ -729,6 +793,9 @@ def _run_tui(target_file, edit_mode=False):
             sys.exit(1)
         if file_type == 'image':
             print("peek: 画像ファイルは編集モードに対応していません。")
+            sys.exit(1)
+        if file_type == 'code':
+            print("peek: コードファイルは TUI 編集モードに対応していません。")
             sys.exit(1)
 
         from rich.markdown import Markdown as RichMarkdown
@@ -853,6 +920,7 @@ def _run_tui(target_file, edit_mode=False):
         f"#img-preview  {{ color: {text_c}; padding: 1 2; }}\n"
         f"#img-info     {{ color: #f9e2af; padding: 2 4; }}\n"
         f"#csv-txt      {{ color: {text_c}; padding: 1 2; }}\n"
+        f"#code-view    {{ padding: 1 0; }}\n"
             + cmd_css
         )
         BINDINGS = view_bindings
@@ -892,6 +960,12 @@ def _run_tui(target_file, edit_mode=False):
             elif file_type == 'csv':
                 with VerticalScroll():
                     yield Static(content, id='csv-txt')
+            elif file_type == 'code':
+                with VerticalScroll():
+                    yield Static(
+                        _rich_syntax if _rich_syntax is not None else content,
+                        id='code-view',
+                    )
             else:
                 yield Static(
                     f"PDF: {path.name}\n\n"
@@ -1994,6 +2068,33 @@ def _suggest_flag(arg):
 def main():
     args = sys.argv[1:]
 
+    # Stdin detection
+    _stdin_tmp = None
+    try:
+        _stdin_piped = not sys.stdin.isatty()
+    except Exception:
+        _stdin_piped = False
+    if _stdin_piped:
+        try:
+            raw = sys.stdin.buffer.read()
+            if raw:
+                _tp = raw.decode('utf-8', errors='replace')
+                _is_diff = (re.search(r'^---\s', _tp, re.MULTILINE) and
+                            re.search(r'^\+\+\+\s', _tp, re.MULTILINE))
+                _sfx = '.diff' if _is_diff else '.txt'
+                _tmp = tempfile.NamedTemporaryFile(
+                    suffix=_sfx, prefix='peek_stdin_', mode='wb', delete=False
+                )
+                _tmp.write(raw)
+                _tmp.close()
+                atexit.register(os.unlink, _tmp.name)
+                _stdin_tmp = _tmp.name
+        except Exception:
+            pass
+
+    if not args and _stdin_tmp:
+        args = [_stdin_tmp]
+
     if not args:
         print(f"peek {VERSION}  —  ファイルビューア for WSL / Linux / macOS")
         print()
@@ -2097,8 +2198,41 @@ def main():
     args = clean_args
 
     if not args:
-        print("peek: ファイルが指定されていません。")
-        print("      使い方: peek [オプション] <ファイル>")
+        if _stdin_tmp:
+            args = [_stdin_tmp]
+        else:
+            print("peek: ファイルが指定されていません。")
+            print("      使い方: peek [オプション] <ファイル>")
+            sys.exit(1)
+
+    if len(args) == 2:
+        _f1, _f2 = os.path.abspath(args[0]), os.path.abspath(args[1])
+        for _f in (_f1, _f2):
+            if not os.path.exists(_f):
+                print(f"peek: '{_f}': No such file")
+                sys.exit(1)
+        _n1, _n2 = Path(_f1).name, Path(_f2).name
+        try:
+            _la = Path(_f1).read_text(encoding='utf-8', errors='replace').splitlines(keepends=True)
+            _lb = Path(_f2).read_text(encoding='utf-8', errors='replace').splitlines(keepends=True)
+        except Exception:
+            print("peek: ファイルの読み込みに失敗しました")
+            sys.exit(1)
+        _dl = list(difflib.unified_diff(_la, _lb, fromfile=_n1, tofile=_n2))
+        if not _dl:
+            print(f"peek: '{_n1}' と '{_n2}' に差分はありません。")
+            sys.exit(0)
+        _s1, _s2 = Path(_f1).stem[:20], Path(_f2).stem[:20]
+        _dtmp = tempfile.NamedTemporaryFile(
+            suffix='.diff', prefix=f"diff_{_s1}_vs_{_s2}_",
+            mode='w', delete=False, encoding='utf-8'
+        )
+        _dtmp.write(''.join(_dl))
+        _dtmp.close()
+        atexit.register(os.unlink, _dtmp.name)
+        args = [_dtmp.name]
+    elif len(args) > 2:
+        print("peek: ファイルは最大2つまで指定できます（差分表示）。")
         sys.exit(1)
 
     file_path = args[0]
@@ -2123,6 +2257,9 @@ def main():
 
     if edit_mode and ext in IMAGE_EXT:
         print("peek: 画像ファイルは編集モードに対応していません。")
+        sys.exit(1)
+    if edit_mode and ext in CODE_EXT:
+        print("peek: コードファイルは編集モードに対応していません。")
         sys.exit(1)
 
     if tui_mode:

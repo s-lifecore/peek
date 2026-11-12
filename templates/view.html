@@ -64,7 +64,8 @@
     .accent-bar.txt { background: var(--accent-txt); }
     .accent-bar.pdf { background: var(--accent-pdf); }
     .accent-bar.img { background: var(--mauve); }
-    .accent-bar.csv { background: var(--yellow); }
+    .accent-bar.csv  { background: var(--yellow); }
+    .accent-bar.code { background: var(--mauve); }
 
     /* ───── Header ───── */
     header {
@@ -97,8 +98,9 @@
     .badge-md  { background: var(--accent-md);  color: var(--surface); }
     .badge-txt { background: var(--accent-txt); color: var(--surface); }
     .badge-pdf { background: var(--accent-pdf); color: var(--surface); }
-    .badge-img { background: var(--mauve);      color: var(--surface); }
-    .badge-csv { background: var(--yellow);     color: var(--surface); }
+    .badge-img  { background: var(--mauve);      color: var(--surface); }
+    .badge-csv  { background: var(--yellow);     color: var(--surface); }
+    .badge-code { background: var(--mauve);      color: var(--surface); }
 
     /* Header right: buttons */
     .header-right { margin-left: auto; display: flex; align-items: center; gap: 8px; }
@@ -437,6 +439,47 @@
       min-height: 0;
     }
 
+    /* ───── Code (Pygments) ───── */
+    .code-view {
+      font-family: var(--font-code);
+      font-size: var(--font-size);
+      line-height: 1.65;
+      padding: 0;
+    }
+    .code-view .highlighttable {
+      width: 100%;
+      border-collapse: collapse;
+      border-spacing: 0;
+    }
+    .code-view .linenos {
+      background: var(--surface) !important;
+      border-right: 1px solid var(--border);
+      vertical-align: top;
+      user-select: none;
+    }
+    .code-view .linenodiv pre {
+      background: transparent !important;
+      color: var(--muted) !important;
+      padding: 16px 16px 16px 20px;
+      margin: 0;
+      font-family: var(--font-code);
+      font-size: var(--font-size);
+      line-height: 1.65;
+      border: none;
+    }
+    .code-view .code { vertical-align: top; width: 100%; }
+    .code-view .highlight { background: var(--bg) !important; }
+    .code-view .highlight pre {
+      background: var(--bg) !important;
+      margin: 0;
+      padding: 16px 24px;
+      font-family: var(--font-code);
+      font-size: var(--font-size);
+      line-height: 1.65;
+      border: none;
+      overflow: visible;
+    }
+
     /* ───── PDF ───── */
     .pdf-frame {
       width: 100%;
@@ -565,6 +608,7 @@
     {%- elif file_type == 'pdf' %} pdf
     {%- elif file_type == 'image' %} img
     {%- elif file_type == 'csv' %} csv
+    {%- elif file_type == 'code' %} code
     {%- endif %}"></div>
 
   <header>
@@ -579,6 +623,8 @@
       <span class="badge badge-img">IMG</span>
     {% elif file_type == 'csv' %}
       <span class="badge badge-csv">CSV</span>
+    {% elif file_type == 'code' %}
+      <span class="badge badge-code">{{ filename.rsplit('.',1)[-1].upper() if '.' in filename else 'CODE' }}</span>
     {% endif %}
 
     {% if edit_mode %}<span class="unsaved-dot" id="unsaved-dot"></span>{% endif %}
@@ -630,7 +676,7 @@
     </div>
   </div>
 
-  {% if edit_mode and file_type not in ('pdf', 'image') %}
+  {% if edit_mode and file_type not in ('pdf', 'image', 'code') %}
 
   <div class="editor-layout">
     <div class="editor-pane" id="editor-pane">
@@ -689,6 +735,9 @@
           </table>
         </div>
       </div>
+
+    {% elif file_type == 'code' %}
+      <div class="code-view">{{ content | safe }}</div>
 
     {% endif %}
 
@@ -946,7 +995,7 @@
   </script>
   {% endif %}
 
-  {% if edit_mode and file_type not in ('pdf', 'image') %}
+  {% if edit_mode and file_type not in ('pdf', 'image', 'code') %}
   <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/dompurify@3/dist/purify.min.js"></script>
   <script>
