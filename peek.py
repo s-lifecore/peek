@@ -142,6 +142,7 @@ EXAMPLES:
 HOW IT WORKS:
   Browser mode (default): starts a local Flask server and opens the browser.
   TUI mode (-t): renders the file directly in the terminal using textual.
+    Keys: ↑/↓ or j/k to scroll, Ctrl+U/Ctrl+D for page, g/G for top/bottom (vim).
   With -e, server runs in background and terminal is freed (kill <PID> to stop).
 
 BUGS / FEEDBACK:
@@ -195,6 +196,7 @@ HELP_JA = """peek {version} - WSL / Linux / macOS ターミナル用 GUI ファ�
 仕組み:
   ブラウザモード（デフォルト）: Flask ローカルサーバーを起動しブラウザで開く。
   TUI モード (-t): textual を使ってターミナル内に直接レンダリング。
+    キー: ↑/↓ または j/k でスクロール、Ctrl+U/Ctrl+D でページ移動、g/G で先頭/末尾（vim）。
   -e: サーバーがバックグラウンドで動作し、端末が解放されます（kill <PID> で停止）。
 
 バグ報告・機能追加の要望:
@@ -960,6 +962,12 @@ def _run_tui(target_file, edit_mode=False):
     view_bindings = []
     if quit_key != "vim":
         view_bindings.append(Binding(quit_key, "quit", "終了"))
+    view_bindings += [
+        Binding("j",      "scroll_j",   show=False),
+        Binding("k",      "scroll_k",   show=False),
+        Binding("ctrl+d", "page_fwd",   show=False),
+        Binding("ctrl+u", "page_bwd",   show=False),
+    ]
 
     class PeekApp(App):
         TITLE = path.name
@@ -968,7 +976,7 @@ def _run_tui(target_file, edit_mode=False):
             f"Screen        {{ background: {bg}; }}\n"
             f"Header        {{ background: {surface}; color: {text_c}; }}\n"
             f"Footer        {{ background: {surface}; color: {muted}; }}\n"
-            f"Markdown      {{ height: 1fr; padding: 1 2; background: {bg}; }}\n"
+            f"Markdown      {{ padding: 1 2; background: {bg}; }}\n"
             f"VerticalScroll{{ height: 1fr; background: {bg}; }}\n"
             f"#txt          {{ color: {text_c}; padding: 1 2; }}\n"
             f"#pdf-info     {{ color: #f9e2af; padding: 2 4; }}\n"
@@ -982,10 +990,50 @@ def _run_tui(target_file, edit_mode=False):
         _cmd_mode = False
         _cmd_buf = ""
 
+        def _scroller(self):
+            try:
+                return self.query_one(VerticalScroll)
+            except Exception:
+                return None
+
+        def on_mount(self) -> None:
+            vs = self._scroller()
+            if vs:
+                vs.focus()
+
+        def action_scroll_j(self) -> None:
+            if self._cmd_mode:
+                return
+            vs = self._scroller()
+            if vs:
+                vs.scroll_down()
+
+        def action_scroll_k(self) -> None:
+            if self._cmd_mode:
+                return
+            vs = self._scroller()
+            if vs:
+                vs.scroll_up()
+
+        def action_page_fwd(self) -> None:
+            if self._cmd_mode:
+                return
+            vs = self._scroller()
+            if vs:
+                vs.scroll_page_down()
+
+        def action_page_bwd(self) -> None:
+            if self._cmd_mode:
+                return
+            vs = self._scroller()
+            if vs:
+                vs.scroll_page_up()
+
         def compose(self) -> ComposeResult:
             yield Header(show_clock=False)
             if file_type == 'markdown':
-                yield Markdown(content)
+                with VerticalScroll():
+                    yield Markdown(content)
             elif file_type == 'text':
                 lines = content.split('\n')
                 w = len(str(len(lines)))
@@ -1045,6 +1093,16 @@ def _run_tui(target_file, edit_mode=False):
                     self._cmd_mode = True
                     self._cmd_buf = ":"
                     self._update_cmd_bar()
+                    event.prevent_default()
+                elif event.key == "g":
+                    vs = self._scroller()
+                    if vs:
+                        vs.scroll_home()
+                    event.prevent_default()
+                elif event.key == "G":
+                    vs = self._scroller()
+                    if vs:
+                        vs.scroll_end()
                     event.prevent_default()
             else:
                 event.prevent_default()
